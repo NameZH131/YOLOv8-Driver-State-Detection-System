@@ -3,7 +3,7 @@
 A real-time driver fatigue detection system based on YOLOv8-Pose model, analyzing human pose keypoints to determine the driver's fatigue level.
 if u think this is so good ,please start it.🤧🤧
 
-![alt text](asset/图片1.png)
+![alt text](asset/1.png)
 
 ## Features
 
