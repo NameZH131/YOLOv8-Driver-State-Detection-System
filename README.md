@@ -5,6 +5,8 @@ if u think this is so good ,please start it.🤧🤧
 
 ![alt text](asset/1.png)
 
+![remotion](assets/remotion.gif)
+
 ## 功能特性
 
 - **实时姿态检测**: 使用YOLOv8-Pose模型检测17个人体关键点
