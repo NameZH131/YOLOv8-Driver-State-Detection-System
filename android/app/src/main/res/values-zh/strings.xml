@@ -6,8 +6,13 @@
     <string name="driver_state_normal">正常</string>
     <string name="driver_state_slightly_tired">轻度疲劳</string>
     <string name="driver_state_tired">疲劳</string>
+    <string name="state_normal">正常</string>
+    <string name="state_slightly_tired">轻度疲劳</string>
+    <string name="state_tired">疲劳</string>
+    <string name="driver_state">驾驶员状态</string>
     
     <!-- Head Poses -->
+    <string name="head_pose">头部姿态</string>
     <string name="head_pose_facing_forward">正视前方</string>
     <string name="head_pose_head_up">抬头</string>
     <string name="head_pose_head_down">低头</string>
@@ -17,9 +22,11 @@
     <string name="unknown">未知</string>
     
     <!-- UI Labels -->
-    <string name="frame_count">帧: %d</string>
+    <string name="frame_count">帧</string>
+    <string name="window_frames">窗口帧</string>
     <string name="rotation">旋转</string>
     <string name="rotate">旋转</string>
+    <string name="calibration_status">校准状态</string>
     <string name="calibrated">已校准</string>
     <string name="not_calibrated">未校准</string>
     
@@ -34,24 +41,33 @@
     <!-- Settings -->
     <string name="settings">设置</string>
     <string name="vibration">震动</string>
+    <string name="vibration_alert">震动提醒</string>
+    <string name="enable_vibration">启用震动</string>
     <string name="vibration_mode">震动模式</string>
     <string name="vibration_short">短震 (100ms)</string>
     <string name="vibration_long">长震 (300ms)</string>
     <string name="vibration_double">双击震动</string>
     <string name="vibration_pulse">脉冲震动</string>
     <string name="audio_alert">音频提醒</string>
+    <string name="enable_audio">启用音频</string>
     <string name="volume">音量</string>
     <string name="tired_audio">疲劳提醒音频</string>
     <string name="slightly_tired_audio">轻度疲劳提醒音频</string>
     <string name="default_audio">默认音频</string>
     <string name="select_custom_audio">选择自定义音频</string>
     <string name="sliding_window_duration">滑动窗时长</string>
+    <string name="window_duration">窗口时长</string>
     <string name="language">语言</string>
+    <string name="language_auto">自动</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">English</string>
     <string name="auto">自动</string>
     <string name="chinese">中文</string>
     <string name="english">English</string>
     <string name="detection_mode">检测模式</string>
+    <string name="frame_by_frame">逐帧检测</string>
     <string name="frame_detection">逐帧检测</string>
+    <string name="sliding_window">滑动窗</string>
     <string name="sliding_window_mode">滑动窗模式</string>
     <string name="settings_saved">设置已保存</string>
     <string name="settings_saved_restart">设置已保存，正在重启…</string>

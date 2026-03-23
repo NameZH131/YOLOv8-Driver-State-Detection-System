@@ -31,7 +31,9 @@ fun CameraPreview(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     
-    val previewView = remember { PreviewView(context) }
+    val previewView = remember { PreviewView(context).apply {
+        scaleType = PreviewView.ScaleType.FILL_CENTER
+    } }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     
     // 相机初始化
