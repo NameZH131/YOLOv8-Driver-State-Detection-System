@@ -1,5 +1,10 @@
 package com.yolo.driver.ui.compose
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.ImageProxy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yolo.driver.R
 import com.yolo.driver.analyzer.KeypointDetector
@@ -43,18 +49,38 @@ import com.yolo.driver.ui.compose.components.CameraPreview
 import com.yolo.driver.ui.compose.components.KeypointOverlay
 import com.yolo.driver.ui.compose.theme.DriverMonitorTheme
 import com.yolo.driver.ui.viewmodel.CalibrationViewModel
+import com.yolo.driver.util.CameraUtils
+import java.io.File
 
 /**
+ * @writer: zhangheng
  * 校准界面 Composable
  */
 @Composable
 fun CalibrationScreen(
-    viewModel: CalibrationViewModel = viewModel(),
-    onCalibrationComplete: () -> Unit = {},
-    onCancel: () -> Unit = {}
+    viewModel: CalibrationViewModel = viewModel(factory = CalibrationViewModel.Factory(LocalContext.current)),
+    onNavigateBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    
+    // 权限状态
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    
+    // 权限请求
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (!granted) {
+            Toast.makeText(context, R.string.camera_permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
     
     // 检测器生命周期管理
     var detector by remember { mutableStateOf<KeypointDetector?>(null) }
@@ -62,15 +88,21 @@ fun CalibrationScreen(
     // NV21 缓冲区复用
     var nv21Buffer by remember { mutableStateOf<ByteArray?>(null) }
     
-    // 初始化检测器
+    // 初始化
     DisposableEffect(Unit) {
+        // 请求相机权限
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+        
+        // 初始化检测器
         detector = KeypointDetector.getInstance()
         
-        val paramPath = context.filesDir.resolve("yolov8n_pose.ncnn.param").absolutePath
-        val binPath = context.filesDir.resolve("yolov8n_pose.ncnn.bin").absolutePath
+        val paramPath = File(context.filesDir, "yolov8n_pose.ncnn.param").absolutePath
+        val binPath = File(context.filesDir, "yolov8n_pose.ncnn.bin").absolutePath
         
         if (detector?.init(paramPath, binPath, useGPU = true) != true) {
-            // 显示错误
+            Toast.makeText(context, "检测器初始化失败", Toast.LENGTH_LONG).show()
         }
         
         onDispose {
@@ -83,25 +115,48 @@ fun CalibrationScreen(
     val onFrameAnalysis: (ImageProxy) -> Unit = { imageProxy ->
         detector?.let { det ->
             if (det.isInitialized()) {
-                // 简化的帧处理
-                imageProxy.close()
+                val nv21 = CameraUtils.imageProxyToNV21(imageProxy, nv21Buffer)
+                nv21Buffer = nv21
+                
+                val result = det.detectWithResult(
+                    nv21,
+                    imageProxy.width,
+                    imageProxy.height
+                )
+                
+                when (result) {
+                    is KeypointDetector.DetectResult.Success -> {
+                        viewModel.updateKeypoints(
+                            result.keypoints,
+                            imageProxy.width,
+                            imageProxy.height
+                        )
+                        viewModel.processFrame()
+                    }
+                    is KeypointDetector.DetectResult.Failed -> {
+                        viewModel.clearKeypoints()
+                    }
+                }
             }
         }
+        imageProxy.close()
     }
     
     DriverMonitorTheme(darkTheme = true) {
         Box(modifier = Modifier.fillMaxSize()) {
             // 相机预览
-            CameraPreview(
-                modifier = Modifier.fillMaxSize(),
-                onFrameAnalysis = onFrameAnalysis
-            )
+            if (hasCameraPermission) {
+                CameraPreview(
+                    modifier = Modifier.fillMaxSize(),
+                    onFrameAnalysis = onFrameAnalysis
+                )
+            }
             
             // 关键点覆盖层
             KeypointOverlay(
-                keypoints = emptyList(),  // TODO: 从 ViewModel 获取
-                frameWidth = 640,
-                frameHeight = 480,
+                keypoints = uiState.keypoints,
+                frameWidth = uiState.frameWidth,
+                frameHeight = uiState.frameHeight,
                 rotation = 0,
                 manualRotation = uiState.manualRotation,
                 modifier = Modifier.fillMaxSize()
@@ -115,13 +170,13 @@ fun CalibrationScreen(
             ) {
                 // 当前阶段提示
                 val phaseText = when (uiState.currentPhase) {
-                    CalibrationViewModel.CalibrationPhase.IDLE -> 
+                    CalibrationViewModel.CalibrationPhase.IDLE ->
                         stringResource(R.string.calibrate)
-                    CalibrationViewModel.CalibrationPhase.COLLECTING_BASE -> 
+                    CalibrationViewModel.CalibrationPhase.COLLECTING_BASE ->
                         stringResource(R.string.calibration_phase_base)
-                    CalibrationViewModel.CalibrationPhase.COLLECTING_ACTION -> 
+                    CalibrationViewModel.CalibrationPhase.COLLECTING_ACTION ->
                         stringResource(R.string.calibration_phase_action)
-                    CalibrationViewModel.CalibrationPhase.COMPLETED -> 
+                    CalibrationViewModel.CalibrationPhase.COMPLETED ->
                         stringResource(R.string.calibration_success)
                 }
                 
@@ -135,16 +190,20 @@ fun CalibrationScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
                 
-                // 倒计时
+                // 进度条和倒计时
                 if (uiState.currentPhase == CalibrationViewModel.CalibrationPhase.COLLECTING_BASE ||
                     uiState.currentPhase == CalibrationViewModel.CalibrationPhase.COLLECTING_ACTION) {
                     Spacer(modifier = Modifier.height(8.dp))
+                    
                     LinearProgressIndicator(
-                        progress = { uiState.progress },
+                        progress = { uiState.progress.coerceIn(0f, 1f) },
                         modifier = Modifier
                             .fillMaxWidth(0.8f)
                             .height(8.dp),
                     )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
                     Text(
                         text = "${uiState.countdown}s",
                         style = MaterialTheme.typography.headlineMedium,
@@ -177,7 +236,10 @@ fun CalibrationScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 取消按钮
-                TextButton(onClick = onCancel) {
+                TextButton(onClick = {
+                    viewModel.reset()
+                    onNavigateBack()
+                }) {
                     Text(
                         text = stringResource(R.string.cancel),
                         color = Color.White
@@ -209,22 +271,20 @@ fun CalibrationScreen(
                                 viewModel.startCalibration()
                             }
                             CalibrationViewModel.CalibrationPhase.COMPLETED -> {
-                                onCalibrationComplete()
+                                viewModel.reset()
+                                onNavigateBack()
                             }
                             else -> {
-                                // 正在校准中，跳过当前动作
                                 viewModel.skipCurrentAction()
                             }
                         }
-                    },
-                    enabled = uiState.currentPhase != CalibrationViewModel.CalibrationPhase.COLLECTING_BASE &&
-                              uiState.currentPhase != CalibrationViewModel.CalibrationPhase.COLLECTING_ACTION
+                    }
                 ) {
                     Text(
                         text = when (uiState.currentPhase) {
-                            CalibrationViewModel.CalibrationPhase.IDLE -> 
+                            CalibrationViewModel.CalibrationPhase.IDLE ->
                                 stringResource(R.string.calibrate)
-                            CalibrationViewModel.CalibrationPhase.COMPLETED -> 
+                            CalibrationViewModel.CalibrationPhase.COMPLETED ->
                                 stringResource(R.string.save)
                             else -> stringResource(R.string.skip)
                         }
@@ -249,15 +309,15 @@ fun CalibrationScreen(
 @Composable
 private fun getActionPrompt(action: CalibrationViewModel.CalibrationAction): String {
     return when (action) {
-        CalibrationViewModel.CalibrationAction.HEAD_UP -> 
+        CalibrationViewModel.CalibrationAction.HEAD_UP ->
             stringResource(R.string.calibration_action_head_up)
-        CalibrationViewModel.CalibrationAction.HEAD_DOWN -> 
+        CalibrationViewModel.CalibrationAction.HEAD_DOWN ->
             stringResource(R.string.calibration_action_head_down)
-        CalibrationViewModel.CalibrationAction.LOOK_LEFT -> 
+        CalibrationViewModel.CalibrationAction.LOOK_LEFT ->
             stringResource(R.string.calibration_action_look_left)
-        CalibrationViewModel.CalibrationAction.LOOK_RIGHT -> 
+        CalibrationViewModel.CalibrationAction.LOOK_RIGHT ->
             stringResource(R.string.calibration_action_look_right)
-        CalibrationViewModel.CalibrationAction.POSTURE_DEVIATION -> 
+        CalibrationViewModel.CalibrationAction.POSTURE_DEVIATION ->
             stringResource(R.string.calibration_action_posture_deviation)
     }
 }

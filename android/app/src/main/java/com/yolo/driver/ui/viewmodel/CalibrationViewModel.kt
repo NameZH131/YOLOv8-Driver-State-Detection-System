@@ -52,11 +52,19 @@ class CalibrationViewModel(
         val requiredFrames: Int = 90,
         val isLoading: Boolean = false,
         val errorMessage: String? = null,
-        val manualRotation: Int = 0  // 手动旋转角度 (0, 90, 180, 270)
+        val manualRotation: Int = 0,  // 手动旋转角度 (0, 90, 180, 270, 360)
+        // 关键点数据
+        val keypoints: List<com.yolo.driver.analyzer.KeypointDetector.KeyPoint> = emptyList(),
+        val frameWidth: Int = 640,
+        val frameHeight: Int = 480
     )
     
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+    
+    // 关键点状态
+    private val _keypoints = MutableStateFlow<List<com.yolo.driver.analyzer.KeypointDetector.KeyPoint>>(emptyList())
+    val keypoints: StateFlow<List<com.yolo.driver.analyzer.KeypointDetector.KeyPoint>> = _keypoints.asStateFlow()
     
     // 校准动作队列
     private val actionQueue = ArrayDeque<CalibrationAction>()
@@ -175,6 +183,26 @@ class CalibrationViewModel(
                 progress = newProgress
             )
         }
+    }
+    
+    /**
+     * 更新关键点（用于 Compose 绘制）
+     */
+    fun updateKeypoints(kps: List<com.yolo.driver.analyzer.KeypointDetector.KeyPoint>, width: Int, height: Int) {
+        _keypoints.value = kps
+        _uiState.value = _uiState.value.copy(
+            keypoints = kps,
+            frameWidth = width,
+            frameHeight = height
+        )
+    }
+    
+    /**
+     * 清除关键点
+     */
+    fun clearKeypoints() {
+        _keypoints.value = emptyList()
+        _uiState.value = _uiState.value.copy(keypoints = emptyList())
     }
     
     /**

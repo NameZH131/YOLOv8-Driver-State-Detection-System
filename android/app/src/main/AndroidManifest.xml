@@ -19,21 +19,18 @@
         android:theme="@style/Theme.DriverStateDetection"
         tools:targetApi="36">
         
+        <!-- 单 Activity 架构：所有页面通过 Compose Navigation 管理 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="fullSensor"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        
-        <activity
-            android:name=".ui.CalibrationActivity"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:screenOrientation="fullSensor" />
             
     </application>
 

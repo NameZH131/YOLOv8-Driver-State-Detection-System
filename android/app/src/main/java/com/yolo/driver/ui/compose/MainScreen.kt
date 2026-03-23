@@ -1,14 +1,18 @@
 package com.yolo.driver.ui.compose
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.ImageProxy
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,18 +22,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yolo.driver.MainViewModel
+import com.yolo.driver.R
+import com.yolo.driver.analyzer.CalibrationManager
 import com.yolo.driver.analyzer.KeypointDetector
+import com.yolo.driver.analyzer.StateAnalyzer
 import com.yolo.driver.ui.compose.components.CameraPreview
 import com.yolo.driver.ui.compose.components.ControlBar
 import com.yolo.driver.ui.compose.components.KeypointOverlay
 import com.yolo.driver.ui.compose.components.SettingsDialog
 import com.yolo.driver.ui.compose.components.StatePanel
 import com.yolo.driver.ui.compose.theme.DriverMonitorTheme
+import com.yolo.driver.util.AudioPlayer
 import com.yolo.driver.util.CameraUtils
+import com.yolo.driver.util.VibrationController
+import java.io.File
 
 /**
+ * @writer: zhangheng
  * 主界面 Composable
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,38 +49,93 @@ import com.yolo.driver.util.CameraUtils
 fun MainScreen(
     viewModel: MainViewModel = viewModel(),
     onNavigateToCalibration: () -> Unit = {},
-    onSaveSettings: (MainViewModel.SettingsState) -> Unit = {}
+    onExitApp: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     
+    // 权限状态
+    var hasCameraPermission by remember { 
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == 
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    
+    // 权限请求
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (!granted) {
+            Toast.makeText(context, R.string.camera_permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
+    
     // 检测器生命周期管理
     var detector by remember { mutableStateOf<KeypointDetector?>(null) }
+    var analyzer by remember { mutableStateOf<StateAnalyzer?>(null) }
+    var calibrationManager by remember { mutableStateOf<CalibrationManager?>(null) }
+    var audioPlayer by remember { mutableStateOf<AudioPlayer?>(null) }
+    var vibrationController by remember { mutableStateOf<VibrationController?>(null) }
+    
+    // NV21 缓冲区复用
+    var nv21Buffer by remember { mutableStateOf<ByteArray?>(null) }
+    
+    // 设置对话框
     var showSettingsDialog by remember { mutableStateOf(false) }
     
-    // 初始化检测器
-    DisposableEffect(Unit) {
+    // 初始化
+    LaunchedEffect(Unit) {
+        // 请求相机权限
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+        
+        // 初始化检测器
         detector = KeypointDetector.getInstance()
         
-        // 初始化模型
-        val paramPath = context.filesDir.resolve("yolov8n_pose.ncnn.param").absolutePath
-        val binPath = context.filesDir.resolve("yolov8n_pose.ncnn.bin").absolutePath
-        
-        // 复制模型文件到内部存储（如果不存在）
+        // 复制模型文件到内部存储
         copyAssetsIfNeeded(context)
+        
+        val paramPath = File(context.filesDir, "yolov8n_pose.ncnn.param").absolutePath
+        val binPath = File(context.filesDir, "yolov8n_pose.ncnn.bin").absolutePath
         
         if (detector?.init(paramPath, binPath, useGPU = true) != true) {
             Toast.makeText(context, "检测器初始化失败", Toast.LENGTH_LONG).show()
         }
         
+        // 初始化分析器
+        analyzer = StateAnalyzer()
+        calibrationManager = CalibrationManager(context)
+        
+        // 初始化音频和震动控制器
+        audioPlayer = AudioPlayer(context)
+        vibrationController = VibrationController(context)
+        
+        // 注入到 ViewModel
+        analyzer?.let { a ->
+            calibrationManager?.let { cm ->
+                viewModel.initAnalyzer(a, cm)
+            }
+        }
+        viewModel.initMediaControllers(context)
+        
+        // 加载校准数据
+        viewModel.updateCalibrationStatus()
+    }
+    
+    // 清理资源
+    DisposableEffect(Unit) {
         onDispose {
             KeypointDetector.releaseInstance()
             detector = null
+            analyzer = null
+            calibrationManager = null
+            audioPlayer?.destroy()
+            vibrationController?.cancel()
         }
     }
-    
-    // NV21 缓冲区复用
-    var nv21Buffer by remember { mutableStateOf<ByteArray?>(null) }
     
     // 帧处理回调
     val onFrameAnalysis: (ImageProxy) -> Unit = { imageProxy ->
@@ -78,19 +145,27 @@ fun MainScreen(
                 nv21Buffer = nv21
                 
                 val result = det.detectWithResult(
-                    nv21, 
-                    imageProxy.width, 
+                    nv21,
+                    imageProxy.width,
                     imageProxy.height
                 )
                 
                 when (result) {
                     is KeypointDetector.DetectResult.Success -> {
-                        viewModel.processDetectResult(result)
-                        // 这里需要调用 analyze 来获取分析结果
-                        // 暂时跳过，因为需要 StateAnalyzer 实例
+                        // 更新关键点状态
+                        viewModel.updateKeypoints(
+                            result.keypoints,
+                            imageProxy.width,
+                            imageProxy.height
+                        )
+                        
+                        // 进行疲劳分析
+                        val analysis = analyzer?.analyze(result.keypoints)
+                        viewModel.processAnalysis(analysis)
                     }
                     is KeypointDetector.DetectResult.Failed -> {
                         viewModel.processDetectResult(result)
+                        viewModel.clearKeypoints()
                     }
                 }
             }
@@ -100,18 +175,20 @@ fun MainScreen(
     
     DriverMonitorTheme(darkTheme = true) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // 相机预览
-            CameraPreview(
-                modifier = Modifier.fillMaxSize(),
-                onFrameAnalysis = onFrameAnalysis
-            )
+            // 相机预览（需要权限）
+            if (hasCameraPermission) {
+                CameraPreview(
+                    modifier = Modifier.fillMaxSize(),
+                    onFrameAnalysis = onFrameAnalysis
+                )
+            }
             
             // 关键点覆盖层
             KeypointOverlay(
-                keypoints = emptyList(),  // TODO: 从 ViewModel 获取
-                frameWidth = 640,
-                frameHeight = 480,
-                rotation = 0,
+                keypoints = uiState.keypoints,
+                frameWidth = uiState.frameWidth,
+                frameHeight = uiState.frameHeight,
+                rotation = 0,  // 系统旋转，由 CameraX 处理
                 manualRotation = uiState.manualRotation,
                 modifier = Modifier.fillMaxSize()
             )
@@ -150,10 +227,16 @@ fun MainScreen(
                     onDismiss = { showSettingsDialog = false },
                     onSave = { newSettings ->
                         viewModel.updateSettings(newSettings)
-                        onSaveSettings(newSettings)
                         showSettingsDialog = false
                     }
                 )
+            }
+            
+            // 错误提示
+            uiState.detectionError?.let { error ->
+                LaunchedEffect(error) {
+                    Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -165,7 +248,7 @@ fun MainScreen(
 private fun copyAssetsIfNeeded(context: android.content.Context) {
     val files = listOf("yolov8n_pose.ncnn.param", "yolov8n_pose.ncnn.bin")
     files.forEach { fileName ->
-        val targetFile = context.filesDir.resolve(fileName)
+        val targetFile = File(context.filesDir, fileName)
         if (!targetFile.exists()) {
             context.assets.open(fileName).use { input ->
                 targetFile.outputStream().use { output ->

@@ -79,11 +79,23 @@ class MainViewModel : ViewModel() {
         val detectionError: String? = null,
         val noPersonCount: Int = 0,
         val settingsState: SettingsState = SettingsState(),
-        val windowFrameCount: Int = 0               // 滑动窗内帧数
+        val windowFrameCount: Int = 0,              // 滑动窗内帧数
+        // 关键点数据（用于 Compose 绘制）
+        val keypoints: List<KeypointDetector.KeyPoint> = emptyList(),
+        val frameWidth: Int = 640,
+        val frameHeight: Int = 480
     )
     
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+    
+    // 关键点状态（单独暴露，减少重组）
+    private val _keypoints = MutableStateFlow<List<KeypointDetector.KeyPoint>>(emptyList())
+    val keypoints: StateFlow<List<KeypointDetector.KeyPoint>> = _keypoints.asStateFlow()
+    
+    // 帧尺寸
+    private val _frameSize = MutableStateFlow(Pair(640, 480))
+    val frameSize: StateFlow<Pair<Int, Int>> = _frameSize.asStateFlow()
     
     // 分析器（由 Activity 注入）
     private var analyzer: StateAnalyzer? = null
@@ -183,6 +195,27 @@ class MainViewModel : ViewModel() {
             // 触发音频和震动
             triggerAlerts(driverState)
         }
+    }
+    
+    /**
+     * 更新关键点和帧尺寸（用于 Compose 绘制）
+     */
+    fun updateKeypoints(kps: List<KeypointDetector.KeyPoint>, width: Int, height: Int) {
+        _keypoints.value = kps
+        _frameSize.value = Pair(width, height)
+        _uiState.value = _uiState.value.copy(
+            keypoints = kps,
+            frameWidth = width,
+            frameHeight = height
+        )
+    }
+    
+    /**
+     * 清除关键点（无人检测到时）
+     */
+    fun clearKeypoints() {
+        _keypoints.value = emptyList()
+        _uiState.value = _uiState.value.copy(keypoints = emptyList())
     }
     
     /**
