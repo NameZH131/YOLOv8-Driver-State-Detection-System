@@ -5,35 +5,46 @@ import com.yolo.driver.analyzer.KeypointDetector.KeyPoint
 import com.yolo.driver.data.CalibrationData
 import com.yolo.driver.data.CalibrationThresholds
 import kotlin.math.abs
-import kotlin.math.pow
 
 /**
  * 驾驶员状态分析器
  * 基于关键点检测分析头部姿态和坐姿，判断疲劳程度
+ * 
+ * 支持用户自定义姿态状态映射：
+ * - 逐帧模式：检测到某姿态直接返回对应状态
+ * - 滑动窗模式：累积后根据最高优先级状态返回
  */
 class StateAnalyzer {
     
     companion object {
-        // 疲劳状态阈值 (直接使用最终值，避免混淆)
-        private const val TIRED_THRESHOLD = 1.44f           // 疲劳状态阈值 (1.2 * 1.2)
-        private const val SLIGHTLY_TIRED_THRESHOLD = 0.96f  // 轻度疲劳阈值 (1.2 * 0.8)
-        
-        // 疲劳评分累积系数
-        private const val HEAD_POSE_SCORE = 1.2f            // 抬头/低头累积系数
-        private const val POSTURE_DEVIATION_SCORE = 2.0f    // 坐姿倾斜累积系数
-        private const val UNKNOWN_STATE_SCORE = 0.5f        // 未知状态累积系数
-        
-        // 置信度阈值
+        // 默认置信度阈值
         private const val DEFAULT_EYE_CONFIDENCE = 0.5f
         private const val DEFAULT_SHOULDER_CONFIDENCE = 0.5f
         private const val DEFAULT_NOSE_CONFIDENCE = 0.5f
     }
     
+    // 可配置的置信度阈值（用于分析）
+    private var analysisConfidenceThreshold = DEFAULT_NOSE_CONFIDENCE
+    
     // 疲劳状态
     enum class DriverState {
         NORMAL,
         SLIGHTLY_TIRED,
-        TIRED
+        TIRED;
+        
+        fun toInt(): Int = when (this) {
+            NORMAL -> 0
+            SLIGHTLY_TIRED -> 1
+            TIRED -> 2
+        }
+        
+        companion object {
+            fun fromInt(value: Int): DriverState = when (value) {
+                1 -> SLIGHTLY_TIRED
+                2 -> TIRED
+                else -> NORMAL
+            }
+        }
     }
     
     // 头部姿态类型
@@ -46,39 +57,104 @@ class StateAnalyzer {
         POSTURE_DEVIATION // 坐姿倾斜
     }
     
+    // 姿态状态映射
+    data class PoseStateMapping(
+        val headUpDown: DriverState = DriverState.TIRED,               // 抬头/低头 -> 疲劳
+        val headLeftRight: DriverState = DriverState.NORMAL,           // 左右摆头 -> 正常
+        val postureDeviation: DriverState = DriverState.TIRED          // 姿态偏移 -> 疲劳
+    )
+    
     // 检测结果
     data class AnalysisResult(
         val driverState: DriverState,
         val headPoses: Set<HeadPose>,
-        val tiredFrameCount: Float,
         val frameCount: Int,
         val timestamp: Long = System.currentTimeMillis(),
         val calibrated: Boolean
     )
     
-    // 置信度阈值
-    private val eyeConfidenceThreshold = DEFAULT_EYE_CONFIDENCE
-    private val shoulderConfidenceThreshold = DEFAULT_SHOULDER_CONFIDENCE
-    private val noseConfidenceThreshold = DEFAULT_NOSE_CONFIDENCE
-    
-    // 默认阈值 (校准前使用)
+    // 默认阈值 (校准前使用，基于实际校准数据优化)
     private var thresholds = CalibrationThresholds(
-        headUp = -250f,
-        headDown = -200f,
-        headOffset = 38f,
-        headTurned = 20f,
-        postureDeviation = 33f
+        headUp = -180f,
+        headDown = -150.84f,
+        headOffset = 27.08f,
+        headTurned = 16.88f,
+        postureDeviation = 38.5f
     )
     
-    // 滑动窗口参数
-    private val fatigueScoreWindow = ArrayDeque<Float>(30)
-    private val maxWindowSize = 30  // 约一秒的帧数
+    // 姿态状态映射（逐帧模式和滑动窗模式分别设置）
+    private var framePoseMapping = PoseStateMapping()
+    private var slidingPoseMapping = PoseStateMapping()
+    
+    // 当前是否使用滑动窗模式
+    private var isSlidingWindowMode = false
     
     // 状态变量
-    private var tiredFrameCount = 0f
     private var frameCount = 0
-    private var driverState = DriverState.NORMAL
     private var calibrated = false
+    
+    /**
+     * 设置逐帧模式姿态状态映射
+     */
+    fun setFramePoseMapping(mapping: PoseStateMapping) {
+        this.framePoseMapping = mapping
+    }
+    
+    /**
+     * 设置滑动窗模式姿态状态映射
+     */
+    fun setSlidingPoseMapping(mapping: PoseStateMapping) {
+        this.slidingPoseMapping = mapping
+    }
+    
+    /**
+     * 设置当前检测模式
+     */
+    fun setSlidingWindowMode(enabled: Boolean) {
+        this.isSlidingWindowMode = enabled
+    }
+    
+    /**
+     * 设置关键点置信度阈值
+     * @param drawThreshold 绘制阈值（暂时未使用，由 KeypointDrawer 控制）
+     * @param analysisThreshold 分析阈值，低于此值的关键点不参与姿态判断
+     */
+    fun setKeypointThresholds(drawThreshold: Float, analysisThreshold: Float) {
+        this.analysisConfidenceThreshold = analysisThreshold
+    }
+    
+    /**
+     * 设置姿态状态映射（已废弃，使用 setAllPoseMappings）
+     */
+    @Deprecated("Use setAllPoseMappings instead")
+    fun setPoseMapping(mapping: PoseStateMapping) {
+        // 兼容旧代码，同时设置两个映射
+        this.framePoseMapping = mapping
+        this.slidingPoseMapping = mapping
+    }
+    
+    /**
+     * 设置所有姿态映射（同时设置两种模式）
+     */
+    fun setAllPoseMappings(frameMapping: PoseStateMapping, slidingMapping: PoseStateMapping) {
+        this.framePoseMapping = frameMapping
+        this.slidingPoseMapping = slidingMapping
+    }
+    
+    /**
+     * 获取当前使用的姿态状态映射
+     */
+    fun getPoseMapping(): PoseStateMapping = if (isSlidingWindowMode) slidingPoseMapping else framePoseMapping
+    
+    /**
+     * 获取逐帧模式姿态映射
+     */
+    fun getFramePoseMapping(): PoseStateMapping = framePoseMapping
+    
+    /**
+     * 获取滑动窗模式姿态映射
+     */
+    fun getSlidingPoseMapping(): PoseStateMapping = slidingPoseMapping
     
     /**
      * 设置校准阈值
@@ -89,69 +165,55 @@ class StateAnalyzer {
     }
     
     /**
-     * 分析驾驶员状态
+     * 分析驾驶员状态（逐帧模式，直接使用姿态映射）
      */
     fun analyze(keypoints: List<KeyPoint>?): AnalysisResult {
         frameCount++
         
-        // 计算当前帧疲劳评分
-        val currentScore = calculateFrameScore(keypoints)
-        
-        // 滑动窗口累积
-        fatigueScoreWindow.addLast(currentScore)
-        if (fatigueScoreWindow.size > maxWindowSize) {
-            fatigueScoreWindow.removeFirst()
-        }
-        
-        // 计算累积疲劳评分（带衰减因子）
-        val decayFactor = 0.95f  // 衰减因子，近期帧权重更高
-        tiredFrameCount = 0f
-        fatigueScoreWindow.reversed().forEachIndexed { index, score ->
-            tiredFrameCount += score * (decayFactor.pow(index))
-        }
-        
-        // 分析头部姿态（用于 UI 显示）
+        // 分析头部姿态
         val headPoses = if (keypoints != null && keypoints.size >= 17) {
             analyzeHeadPose(keypoints)
         } else {
             emptySet()
         }
         
-        // 判断疲劳状态
-        driverState = when {
-            tiredFrameCount >= TIRED_THRESHOLD -> DriverState.TIRED
-            tiredFrameCount > SLIGHTLY_TIRED_THRESHOLD -> DriverState.SLIGHTLY_TIRED
-            else -> DriverState.NORMAL
-        }
+        // 根据姿态映射确定状态（取最高优先级）
+        val driverState = determineStateFromPoses(headPoses)
         
-        return buildResult(headPoses)
+        return AnalysisResult(
+            driverState = driverState,
+            headPoses = headPoses,
+            frameCount = frameCount,
+            calibrated = calibrated
+        )
     }
     
     /**
-     * 计算单帧疲劳评分
+     * 根据检测到的姿态和用户映射确定状态
+     * 取最高优先级状态（疲劳 > 轻度疲劳 > 正常）
      */
-    private fun calculateFrameScore(keypoints: List<KeyPoint>?): Float {
-        if (keypoints == null || keypoints.size < 17) {
-            return UNKNOWN_STATE_SCORE
+    private fun determineStateFromPoses(headPoses: Set<HeadPose>): DriverState {
+        // 根据当前模式选择映射
+        val poseMapping = if (isSlidingWindowMode) slidingPoseMapping else framePoseMapping
+        
+        var maxState = DriverState.NORMAL
+        
+        for (pose in headPoses) {
+            val mappedState = when (pose) {
+                HeadPose.HEAD_UP, HeadPose.HEAD_DOWN -> poseMapping.headUpDown
+                HeadPose.HEAD_OFFSET, HeadPose.HEAD_TURNED -> poseMapping.headLeftRight
+                HeadPose.POSTURE_DEVIATION -> poseMapping.postureDeviation
+                HeadPose.FACING_FORWARD -> DriverState.NORMAL
+            }
+            
+            // 取优先级最高的状态
+            if (mappedState.toInt() > maxState.toInt()) {
+                maxState = mappedState
+            }
         }
         
-        val headPoses = analyzeHeadPose(keypoints)
-        var score = 0f
-        
-        if (headPoses.contains(HeadPose.HEAD_DOWN) || headPoses.contains(HeadPose.HEAD_UP)) {
-            score += HEAD_POSE_SCORE
-        }
-        if (headPoses.contains(HeadPose.POSTURE_DEVIATION)) {
-            score += POSTURE_DEVIATION_SCORE
-        }
-        
-        return score
+        return maxState
     }
-    
-    /**
-     * Float 的 pow 扩展函数
-     */
-    private fun Float.pow(exp: Int): Float = this.toDouble().pow(exp.toDouble()).toFloat()
     
     /**
      * 分析头部姿态
@@ -165,12 +227,12 @@ class StateAnalyzer {
         val leftShoulder = keypoints[KeypointIndex.LEFT_SHOULDER]
         val rightShoulder = keypoints[KeypointIndex.RIGHT_SHOULDER]
         
-        // 检查关键点置信度
-        if (nose.confidence < noseConfidenceThreshold ||
-            leftShoulder.confidence < shoulderConfidenceThreshold ||
-            rightShoulder.confidence < shoulderConfidenceThreshold ||
-            leftEye.confidence < eyeConfidenceThreshold ||
-            rightEye.confidence < eyeConfidenceThreshold) {
+        // 检查关键点置信度（使用统一的可配置阈值）
+        if (nose.confidence < analysisConfidenceThreshold ||
+            leftShoulder.confidence < analysisConfidenceThreshold ||
+            rightShoulder.confidence < analysisConfidenceThreshold ||
+            leftEye.confidence < analysisConfidenceThreshold ||
+            rightEye.confidence < analysisConfidenceThreshold) {
             return poses
         }
         
@@ -221,24 +283,11 @@ class StateAnalyzer {
         return poses
     }
     
-    private fun buildResult(headPoses: Set<HeadPose>): AnalysisResult {
-        return AnalysisResult(
-            driverState = driverState,
-            headPoses = headPoses,
-            tiredFrameCount = tiredFrameCount,
-            frameCount = frameCount,
-            calibrated = calibrated
-        )
-    }
-    
     /**
      * 重置状态
      */
     fun reset() {
-        tiredFrameCount = 0f
         frameCount = 0
-        driverState = DriverState.NORMAL
-        fatigueScoreWindow.clear()
     }
     
     /**
@@ -246,11 +295,11 @@ class StateAnalyzer {
      */
     fun clearCalibration() {
         thresholds = CalibrationThresholds(
-            headUp = -250f,
-            headDown = -200f,
-            headOffset = 38f,
-            headTurned = 20f,
-            postureDeviation = 33f
+            headUp = -180f,
+            headDown = -150.84f,
+            headOffset = 27.08f,
+            headTurned = 16.88f,
+            postureDeviation = 38.5f
         )
         calibrated = false
     }

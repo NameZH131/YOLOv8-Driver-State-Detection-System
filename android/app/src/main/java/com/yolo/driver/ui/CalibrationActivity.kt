@@ -15,6 +15,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.yolo.driver.DriverApplication
+import com.yolo.driver.R
 import com.yolo.driver.analyzer.CalibrationManager
 import com.yolo.driver.analyzer.KeypointDetector
 import com.yolo.driver.databinding.ActivityCalibrationBinding
@@ -112,7 +113,11 @@ class CalibrationActivity : AppCompatActivity() {
         
         // 旋转按钮
         binding.btnRotate.setOnClickListener {
+            Log.d(TAG, "btnRotate clicked, current rotation=${viewModel.getManualRotation()}")
             viewModel.toggleManualRotation()
+            Log.d(TAG, "btnRotate after toggle: new rotation=${viewModel.getManualRotation()}")
+            // 触发重绘以应用新的旋转角度
+            binding.overlayView.invalidate()
         }
         
         // 开始校准
@@ -160,8 +165,8 @@ class CalibrationActivity : AppCompatActivity() {
         binding.btnDuration5s.isSelected = state.duration == CalibrationManager.Duration.ACCURATE
         
         // 更新旋转按钮文本
-        val rotationText = if (state.manualRotation == -1) "自动" else "${state.manualRotation}°"
-        binding.btnRotate.text = "旋转: $rotationText"
+        Log.d(TAG, "updateUI: manualRotation=${state.manualRotation}")
+        binding.btnRotate.text = "${getString(R.string.rotation)}: ${state.manualRotation}°"
         
         // 更新状态文本
         binding.tvState.text = state.stateDisplayName
@@ -188,22 +193,22 @@ class CalibrationActivity : AppCompatActivity() {
         // 校准中状态
         if (state.isCalibrating) {
             binding.btnStartCalibration.visibility = View.GONE
-            binding.btnCancel.text = "取消"
+            binding.btnCancel.text = getString(R.string.cancel)
             binding.durationSelector.visibility = View.GONE
         }
         
         // 完成状态
         if (state.isCompleted) {
             binding.btnStartCalibration.visibility = View.VISIBLE
-            binding.btnCancel.text = "返回"
+            binding.btnCancel.text = getString(R.string.close)
             setResult(RESULT_OK)
-            Toast.makeText(this, "校准成功!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.calibration_success, Toast.LENGTH_SHORT).show()
         }
         
         // 初始状态
         if (state.state == CalibrationManager.State.IDLE && !state.isCompleted) {
             binding.btnStartCalibration.visibility = View.VISIBLE
-            binding.btnCancel.text = "取消"
+            binding.btnCancel.text = getString(R.string.cancel)
             binding.durationSelector.visibility = View.VISIBLE
         }
         

@@ -26,14 +26,24 @@ class AudioPlayer(private val context: Context) {
         private const val DEFAULT_SLIGHTLY_TIRED_AUDIO = "ohYeah.mp3"
     }
     
-    // 当前播放器
+    // 当前播放器 (线程安全)
+    @Volatile
     private var mediaPlayer: MediaPlayer? = null
     
     // 当前播放优先级
+    @Volatile
     private var currentPriority: Int = -1
     
     // 当前播放状态
+    @Volatile
     private var isPlaying: Boolean = false
+    
+    // 是否正在异步准备中
+    @Volatile
+    private var isPreparing: Boolean = false
+    
+    // 线程锁
+    private val lock = Any()
     
     // 播放冷却时间 (避免连续高频播放)
     private var lastPlayTime: Long = 0
@@ -98,44 +108,58 @@ class AudioPlayer(private val context: Context) {
         // 停止当前播放
         stop()
         
-        try {
-            // 确定音频源
-            val audioUri = uri ?: when (priority) {
-                PRIORITY_TIRED -> tiredAudioUri ?: defaultTiredAudioUri
-                PRIORITY_SLIGHTLY_TIRED -> slightlyTiredAudioUri ?: defaultSlightlyTiredAudioUri
-                else -> null
-            }
-            
-            if (audioUri != null && audioUri != Uri.EMPTY) {
-                mediaPlayer = MediaPlayer().apply {
-                    setDataSource(context, audioUri)
-                    setOnPreparedListener {
-                        it.setVolume(volume / 100f, volume / 100f)
-                        it.start()
-                        Log.d(TAG, "Audio prepared and started playing")
-                    }
-                    setOnCompletionListener {
-                        release()
-                    }
-                    setOnErrorListener { _, what, extra ->
-                        Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
-                        release()
-                        true
-                    }
-                    prepareAsync()  // 异步准备，不阻塞线程
+        synchronized(lock) {
+            try {
+                // 确定音频源
+                val audioUri = uri ?: when (priority) {
+                    PRIORITY_TIRED -> tiredAudioUri ?: defaultTiredAudioUri
+                    PRIORITY_SLIGHTLY_TIRED -> slightlyTiredAudioUri ?: defaultSlightlyTiredAudioUri
+                    else -> null
                 }
                 
-                currentPriority = priority
-                isPlaying = true
-                lastPlayTime = currentTime
-                
-                Log.d(TAG, "Started preparing audio with priority=$priority, volume=$volume, uri=$audioUri")
-            } else {
-                Log.w(TAG, "No audio uri available for priority=$priority")
+                if (audioUri != null && audioUri != Uri.EMPTY) {
+                    isPreparing = true
+                    currentPriority = priority
+                    lastPlayTime = currentTime
+                    
+                    val mp = MediaPlayer()
+                    mp.setDataSource(context, audioUri)
+                    mp.setOnPreparedListener { player ->
+                        synchronized(lock) {
+                            isPreparing = false
+                            player.setVolume(volume / 100f, volume / 100f)
+                            player.start()
+                            isPlaying = true
+                        }
+                        Log.d(TAG, "Audio prepared and started playing")
+                    }
+                    mp.setOnCompletionListener {
+                        release()
+                    }
+                    mp.setOnErrorListener { player, what, extra ->
+                        Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
+                        synchronized(lock) {
+                            isPreparing = false
+                        }
+                        player.release()
+                        mediaPlayer = null
+                        isPlaying = false
+                        true
+                    }
+                    mp.prepareAsync()  // 异步准备，不阻塞线程
+                    mediaPlayer = mp
+                    
+                    Log.d(TAG, "Started preparing audio with priority=$priority, volume=$volume, uri=$audioUri")
+                } else {
+                    Log.w(TAG, "No audio uri available for priority=$priority")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to play audio", e)
+                synchronized(lock) {
+                    isPreparing = false
+                }
+                release()
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to play audio", e)
-            release()
         }
     }
     
@@ -157,23 +181,36 @@ class AudioPlayer(private val context: Context) {
      * 停止播放
      */
     fun stop() {
-        mediaPlayer?.let {
-            if (it.isPlaying) {
-                it.stop()
+        synchronized(lock) {
+            mediaPlayer?.let {
+                try {
+                    if (isPreparing) {
+                        // 正在异步准备中，直接释放
+                        Log.d(TAG, "MediaPlayer is preparing, force release")
+                    } else if (it.isPlaying) {
+                        it.stop()
+                    }
+                    it.release()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping MediaPlayer", e)
+                }
             }
-            it.release()
+            mediaPlayer = null
+            isPlaying = false
+            isPreparing = false
         }
-        mediaPlayer = null
-        isPlaying = false
     }
     
     /**
      * 释放资源
      */
     private fun release() {
-        mediaPlayer?.release()
-        mediaPlayer = null
-        isPlaying = false
+        synchronized(lock) {
+            mediaPlayer?.release()
+            mediaPlayer = null
+            isPlaying = false
+            isPreparing = false
+        }
     }
     
     /**

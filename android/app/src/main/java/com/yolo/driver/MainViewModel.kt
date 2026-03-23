@@ -42,9 +42,16 @@ class MainViewModel : ViewModel() {
         is DriverState.Tired -> Color.RED
     }
     
+    // 姿态状态映射（检测到某姿态后对应的疲劳状态）
+    data class PoseStateMapping(
+        val headUpDown: DriverState = DriverState.Tired,               // 抬头/低头 -> 疲劳
+        val headLeftRight: DriverState = DriverState.Normal,           // 左右摆头 -> 正常
+        val postureDeviation: DriverState = DriverState.Tired          // 姿态偏移 -> 疲劳
+    )
+    
     // 设置状态
     data class SettingsState(
-        val vibrationEnabled: Boolean = false,      // 震动开关，默认关闭
+        val vibrationEnabled: Boolean = true,       // 震动开关，默认开启
         val vibrationMode: Int = 0,                 // 震动模式: 0=短震, 1=长震, 2=双击, 3=脉冲
         val audioEnabled: Boolean = true,           // 音频开关，默认开启
         val audioVolume: Int = 100,                 // 音量 0-100
@@ -52,7 +59,13 @@ class MainViewModel : ViewModel() {
         val slightlyTiredAudioUri: String? = null,  // 自定义轻度疲劳音频 URI
         val windowDurationMs: Long = 5000L,         // 滑动窗时长，默认5秒
         val languageMode: Int = 0,                  // 语言模式: 0=自动, 1=中文, 2=英文
-        val isSlidingWindowMode: Boolean = false    // 检测模式: false=逐帧检测, true=滑动窗模式
+        val isSlidingWindowMode: Boolean = false,   // 检测模式: false=逐帧检测, true=滑动窗模式
+        // 姿态状态映射（逐帧模式和滑动窗模式分别设置）
+        val framePoseMapping: PoseStateMapping = PoseStateMapping(),
+        val slidingPoseMapping: PoseStateMapping = PoseStateMapping(),
+        // 关键点置信度阈值
+        val drawThreshold: Float = 0.5f,            // 绘制阈值 (0.3-0.8)
+        val analysisThreshold: Float = 0.5f         // 分析阈值 (0.3-0.8)
     )
     
     // UI 状态
@@ -111,9 +124,13 @@ class MainViewModel : ViewModel() {
         audioPlayer?.setEnabled(settings.audioEnabled)
         audioPlayer?.setVolume(settings.audioVolume)
         
-        // 设置自定义音频 Uri
-        settings.tiredAudioUri?.let { audioPlayer?.setTiredAudioUri(Uri.parse(it)) }
-        settings.slightlyTiredAudioUri?.let { audioPlayer?.setSlightlyTiredAudioUri(Uri.parse(it)) }
+        // 设置自定义音频 Uri (安全解析)
+        settings.tiredAudioUri?.takeIf { it.isNotEmpty() }?.let { 
+            safeParseUri(it)?.let { uri -> audioPlayer?.setTiredAudioUri(uri) }
+        }
+        settings.slightlyTiredAudioUri?.takeIf { it.isNotEmpty() }?.let { 
+            safeParseUri(it)?.let { uri -> audioPlayer?.setSlightlyTiredAudioUri(uri) }
+        }
     }
     
     /**
@@ -172,24 +189,30 @@ class MainViewModel : ViewModel() {
      * 触发音频和震动提醒
      */
     private fun triggerAlerts(newState: DriverState) {
+        android.util.Log.d("MainViewModel", "triggerAlerts: newState=$newState, lastTriggeredState=$lastTriggeredState, vibrationEnabled=${vibrationController?.isEnabled()}")
+        
         // 避免重复触发相同状态
         if (newState == lastTriggeredState && newState == DriverState.Normal) {
+            android.util.Log.d("MainViewModel", "Skip: same state and Normal")
             return
         }
         
         when (newState) {
             is DriverState.Tired -> {
                 // 疲劳状态：播放疲劳音频，触发当前模式的震动
+                android.util.Log.d("MainViewModel", "Tired: playing audio and vibrating")
                 audioPlayer?.playTired()
                 vibrationController?.vibrate()
             }
             is DriverState.SlightlyTired -> {
                 // 轻度疲劳：播放轻度疲劳音频，触发当前模式的震动
+                android.util.Log.d("MainViewModel", "SlightlyTired: playing audio and vibrating")
                 audioPlayer?.playSlightlyTired()
                 vibrationController?.vibrate()
             }
             is DriverState.Normal -> {
                 // 正常状态：不播放音频
+                android.util.Log.d("MainViewModel", "Normal: no alerts")
             }
         }
         
@@ -236,11 +259,20 @@ class MainViewModel : ViewModel() {
     }
     
     /**
-     * 切换手动旋转角度
+     * 切换手动旋转角度 (0 -> 90 -> 180 -> 270 -> 360 -> 0)
      */
     fun toggleManualRotation() {
-        val newRotation = (_uiState.value.manualRotation + 90) % 360
+        val oldRotation = _uiState.value.manualRotation
+        // 支持 360 度，循环：0 -> 90 -> 180 -> 270 -> 360 -> 0
+        val newRotation = when (oldRotation) {
+            0 -> 90
+            90 -> 180
+            180 -> 270
+            270 -> 360
+            else -> 0  // 360 或其他值回到 0
+        }
         _uiState.value = _uiState.value.copy(manualRotation = newRotation)
+        android.util.Log.d("MainViewModel", "toggleManualRotation: $oldRotation -> $newRotation, uiState.manualRotation=${_uiState.value.manualRotation}")
     }
     
     /**
@@ -307,17 +339,51 @@ class MainViewModel : ViewModel() {
         audioPlayer?.setEnabled(newSettings.audioEnabled)
         audioPlayer?.setVolume(newSettings.audioVolume)
         
-        // 更新自定义音频 Uri
-        newSettings.tiredAudioUri?.let { audioPlayer?.setTiredAudioUri(Uri.parse(it)) }
-        newSettings.slightlyTiredAudioUri?.let { audioPlayer?.setSlightlyTiredAudioUri(Uri.parse(it)) }
+        // 更新自定义音频 Uri (安全解析)
+        newSettings.tiredAudioUri?.takeIf { it.isNotEmpty() }?.let { 
+            safeParseUri(it)?.let { uri -> audioPlayer?.setTiredAudioUri(uri) }
+        }
+        newSettings.slightlyTiredAudioUri?.takeIf { it.isNotEmpty() }?.let { 
+            safeParseUri(it)?.let { uri -> audioPlayer?.setSlightlyTiredAudioUri(uri) }
+        }
         
         // 更新滑动窗时长
         if (newSettings.windowDurationMs != _uiState.value.settingsState.windowDurationMs) {
             slidingWindowAnalyzer = SlidingWindowAnalyzer(newSettings.windowDurationMs)
         }
         
+        // 更新 StateAnalyzer 的姿态映射（同时设置两种模式的映射）
+        analyzer?.setAllPoseMappings(
+            StateAnalyzer.PoseStateMapping(
+                headUpDown = convertDriverState(newSettings.framePoseMapping.headUpDown),
+                headLeftRight = convertDriverState(newSettings.framePoseMapping.headLeftRight),
+                postureDeviation = convertDriverState(newSettings.framePoseMapping.postureDeviation)
+            ),
+            StateAnalyzer.PoseStateMapping(
+                headUpDown = convertDriverState(newSettings.slidingPoseMapping.headUpDown),
+                headLeftRight = convertDriverState(newSettings.slidingPoseMapping.headLeftRight),
+                postureDeviation = convertDriverState(newSettings.slidingPoseMapping.postureDeviation)
+            )
+        )
+        // 设置当前检测模式
+        analyzer?.setSlidingWindowMode(newSettings.isSlidingWindowMode)
+        
+        // 更新关键点置信度阈值
+        analyzer?.setKeypointThresholds(newSettings.drawThreshold, newSettings.analysisThreshold)
+        
         // 更新 UI 状态
         _uiState.value = _uiState.value.copy(settingsState = newSettings)
+    }
+    
+    /**
+     * 转换 DriverState (ViewModel -> StateAnalyzer)
+     */
+    private fun convertDriverState(state: DriverState): StateAnalyzer.DriverState {
+        return when (state) {
+            is DriverState.Normal -> StateAnalyzer.DriverState.NORMAL
+            is DriverState.SlightlyTired -> StateAnalyzer.DriverState.SLIGHTLY_TIRED
+            is DriverState.Tired -> StateAnalyzer.DriverState.TIRED
+        }
     }
     
     /**
@@ -364,7 +430,9 @@ class MainViewModel : ViewModel() {
      * 设置疲劳音频 Uri
      */
     fun setTiredAudioUri(uri: String?) {
-        uri?.let { audioPlayer?.setTiredAudioUri(Uri.parse(it)) }
+        uri?.takeIf { it.isNotEmpty() }?.let { 
+            safeParseUri(it)?.let { parsedUri -> audioPlayer?.setTiredAudioUri(parsedUri) }
+        }
         _uiState.value = _uiState.value.copy(
             settingsState = _uiState.value.settingsState.copy(tiredAudioUri = uri)
         )
@@ -374,7 +442,9 @@ class MainViewModel : ViewModel() {
      * 设置轻度疲劳音频 Uri
      */
     fun setSlightlyTiredAudioUri(uri: String?) {
-        uri?.let { audioPlayer?.setSlightlyTiredAudioUri(Uri.parse(it)) }
+        uri?.takeIf { it.isNotEmpty() }?.let { 
+            safeParseUri(it)?.let { parsedUri -> audioPlayer?.setSlightlyTiredAudioUri(parsedUri) }
+        }
         _uiState.value = _uiState.value.copy(
             settingsState = _uiState.value.settingsState.copy(slightlyTiredAudioUri = uri)
         )
@@ -415,5 +485,21 @@ class MainViewModel : ViewModel() {
         super.onCleared()
         audioPlayer?.destroy()
         vibrationController?.cancel()
+    }
+    
+    // ========== 辅助方法 ==========
+    
+    /**
+     * 安全解析 URI 字符串
+     * @return 解析成功返回 Uri，失败返回 null
+     */
+    private fun safeParseUri(uriString: String): Uri? {
+        return try {
+            if (uriString.isBlank()) null
+            else Uri.parse(uriString)
+        } catch (e: Exception) {
+            android.util.Log.e("MainViewModel", "Failed to parse URI: $uriString", e)
+            null
+        }
     }
 }

@@ -116,11 +116,10 @@ class SlidingWindowAnalyzer(
                           slightlyTiredRatio * SLIGHTLY_TIRED_WEIGHT +
                           normalRatio * NORMAL_WEIGHT
         
-        // 判定最终状态 (疲劳优先)
+        // 判定最终状态 (疲劳优先，移除不合理的兜底逻辑)
         val finalState = when {
             tiredRatio >= TIRED_THRESHOLD -> StateAnalyzer.DriverState.TIRED
             slightlyTiredRatio >= SLIGHTLY_TIRED_THRESHOLD -> StateAnalyzer.DriverState.SLIGHTLY_TIRED
-            tiredRatio > 0.1f -> StateAnalyzer.DriverState.SLIGHTLY_TIRED  // 有少量疲劳帧时提示
             else -> StateAnalyzer.DriverState.NORMAL
         }
         

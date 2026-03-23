@@ -58,7 +58,6 @@ fun CalibrationScreen(
     
     // 检测器生命周期管理
     var detector by remember { mutableStateOf<KeypointDetector?>(null) }
-    var manualRotation by remember { mutableStateOf(-1) }
     
     // NV21 缓冲区复用
     var nv21Buffer by remember { mutableStateOf<ByteArray?>(null) }
@@ -90,7 +89,7 @@ fun CalibrationScreen(
         }
     }
     
-    DriverMonitorTheme {
+    DriverMonitorTheme(darkTheme = true) {
         Box(modifier = Modifier.fillMaxSize()) {
             // 相机预览
             CameraPreview(
@@ -104,7 +103,7 @@ fun CalibrationScreen(
                 frameWidth = 640,
                 frameHeight = 480,
                 rotation = 0,
-                manualRotation = manualRotation,
+                manualRotation = uiState.manualRotation,
                 modifier = Modifier.fillMaxSize()
             )
             
@@ -188,14 +187,7 @@ fun CalibrationScreen(
                 // 旋转按钮
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = {
-                        manualRotation = when (manualRotation) {
-                            -1 -> 0
-                            0 -> 90
-                            90 -> 180
-                            180 -> 270
-                            270 -> -1
-                            else -> -1
-                        }
+                        viewModel.toggleManualRotation()
                     }) {
                         Icon(
                             imageVector = Icons.Default.RotateRight,
@@ -204,7 +196,7 @@ fun CalibrationScreen(
                         )
                     }
                     Text(
-                        text = "${if (manualRotation == -1) "Auto" else "$manualRotation°"}",
+                        text = "${uiState.manualRotation}°",
                         color = Color.White
                     )
                 }

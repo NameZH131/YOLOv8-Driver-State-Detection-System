@@ -49,15 +49,15 @@ class VibrationController(private val context: Context) {
         context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
     }
     
-    // 震动启用状态 (默认关闭)
-    private var vibrationEnabled: Boolean = false
+    // 震动启用状态 (默认开启)
+    private var vibrationEnabled: Boolean = true
     
     // 当前震动模式
     private var currentMode: VibrationMode = VibrationMode.SHORT
     
     // 震动冷却时间
     private var lastVibrateTime: Long = 0
-    private var cooldownMs: Long = 2000L
+    private var cooldownMs: Long = 500L  // 缩短冷却时间到500ms
     
     /**
      * 触发震动 (使用当前模式)
@@ -70,6 +70,8 @@ class VibrationController(private val context: Context) {
      * 触发指定模式的震动
      */
     fun vibrate(mode: VibrationMode) {
+        Log.d(TAG, "vibrate called: mode=${mode.name}, vibrationEnabled=$vibrationEnabled")
+        
         if (!vibrationEnabled) {
             Log.d(TAG, "Vibration disabled, skip")
             return
@@ -89,6 +91,8 @@ class VibrationController(private val context: Context) {
         }
         
         try {
+            Log.d(TAG, "Executing vibration with pattern=${mode.pattern.toList()}")
+            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 // Android 8.0+ 使用 VibrationEffect
                 val effect = if (mode.pattern.size == 1) {

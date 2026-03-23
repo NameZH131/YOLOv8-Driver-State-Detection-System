@@ -67,6 +67,20 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_SLIDING_WINDOW_MODE = "sliding_window_mode"
         private const val KEY_MANUAL_ROTATION = "manual_rotation"
         
+        // 姿态状态映射 Keys - 逐帧模式
+        private const val KEY_FRAME_HEAD_UP_DOWN = "frame_head_up_down"
+        private const val KEY_FRAME_HEAD_LEFT_RIGHT = "frame_head_left_right"
+        private const val KEY_FRAME_POSTURE_DEVIATION = "frame_posture_deviation"
+        
+        // 姿态状态映射 Keys - 滑动窗模式
+        private const val KEY_SLIDING_HEAD_UP_DOWN = "sliding_head_up_down"
+        private const val KEY_SLIDING_HEAD_LEFT_RIGHT = "sliding_head_left_right"
+        private const val KEY_SLIDING_POSTURE_DEVIATION = "sliding_posture_deviation"
+        
+        // 关键点置信度阈值 Keys
+        private const val KEY_DRAW_THRESHOLD = "draw_threshold"
+        private const val KEY_ANALYSIS_THRESHOLD = "analysis_threshold"
+        
         // 音频选择请求码
         private const val REQUEST_TIRED_AUDIO = 1001
         private const val REQUEST_SLIGHTLY_TIRED_AUDIO = 1002
@@ -258,6 +272,25 @@ class MainActivity : AppCompatActivity() {
         val slidingWindowMode = sharedPreferences.getBoolean(KEY_SLIDING_WINDOW_MODE, false)
         val manualRotation = sharedPreferences.getInt(KEY_MANUAL_ROTATION, 0)
         
+        // 加载姿态状态映射（默认：抬头/低头=疲劳, 侧看=正常, 姿态偏移=疲劳）
+        val framePoseMapping = MainViewModel.PoseStateMapping(
+            headUpDown = intToDriverState(sharedPreferences.getInt(KEY_FRAME_HEAD_UP_DOWN, 2)), // 默认疲劳
+            headLeftRight = intToDriverState(sharedPreferences.getInt(KEY_FRAME_HEAD_LEFT_RIGHT, 0)), // 默认正常
+            postureDeviation = intToDriverState(sharedPreferences.getInt(KEY_FRAME_POSTURE_DEVIATION, 2)) // 默认疲劳
+        )
+        
+        val slidingPoseMapping = MainViewModel.PoseStateMapping(
+            headUpDown = intToDriverState(sharedPreferences.getInt(KEY_SLIDING_HEAD_UP_DOWN, 2)), // 默认疲劳
+            headLeftRight = intToDriverState(sharedPreferences.getInt(KEY_SLIDING_HEAD_LEFT_RIGHT, 0)), // 默认正常
+            postureDeviation = intToDriverState(sharedPreferences.getInt(KEY_SLIDING_POSTURE_DEVIATION, 2)) // 默认疲劳
+        )
+        
+        // 加载关键点置信度阈值（默认 0.5）
+        val drawThreshold = sharedPreferences.getFloat(KEY_DRAW_THRESHOLD, 0.5f)
+        val analysisThreshold = sharedPreferences.getFloat(KEY_ANALYSIS_THRESHOLD, 0.5f)
+        
+        Log.d(TAG, "loadSettings: slidingWindowMode=$slidingWindowMode (false=逐帧, true=滑动窗)")
+        
         val settings = MainViewModel.SettingsState(
             vibrationEnabled = vibrationEnabled,
             vibrationMode = vibrationMode,
@@ -267,7 +300,11 @@ class MainActivity : AppCompatActivity() {
             slightlyTiredAudioUri = slightlyTiredAudioUri,
             windowDurationMs = windowDuration,
             languageMode = languageMode,
-            isSlidingWindowMode = slidingWindowMode
+            isSlidingWindowMode = slidingWindowMode,
+            framePoseMapping = framePoseMapping,
+            slidingPoseMapping = slidingPoseMapping,
+            drawThreshold = drawThreshold,
+            analysisThreshold = analysisThreshold
         )
         
         viewModel.updateSettings(settings)
@@ -275,9 +312,34 @@ class MainActivity : AppCompatActivity() {
     }
     
     /**
+     * 整数转 DriverState
+     * 0 = Normal, 1 = SlightlyTired, 2 = Tired
+     */
+    private fun intToDriverState(value: Int): MainViewModel.DriverState {
+        return when (value) {
+            0 -> MainViewModel.DriverState.Normal
+            1 -> MainViewModel.DriverState.SlightlyTired
+            2 -> MainViewModel.DriverState.Tired
+            else -> MainViewModel.DriverState.SlightlyTired
+        }
+    }
+    
+    /**
+     * DriverState 转整数
+     */
+    private fun driverStateToInt(state: MainViewModel.DriverState): Int {
+        return when (state) {
+            is MainViewModel.DriverState.Normal -> 0
+            is MainViewModel.DriverState.SlightlyTired -> 1
+            is MainViewModel.DriverState.Tired -> 2
+        }
+    }
+    
+    /**
      * 保存设置
      */
     private fun saveSettings(settings: MainViewModel.SettingsState) {
+        Log.d(TAG, "saveSettings: isSlidingWindowMode=${settings.isSlidingWindowMode}")
         sharedPreferences.edit()
             .putBoolean(KEY_VIBRATION_ENABLED, settings.vibrationEnabled)
             .putInt(KEY_VIBRATION_MODE, settings.vibrationMode)
@@ -286,6 +348,19 @@ class MainActivity : AppCompatActivity() {
             .putLong(KEY_WINDOW_DURATION, settings.windowDurationMs)
             .putInt(KEY_LANGUAGE_MODE, settings.languageMode)
             .putBoolean(KEY_SLIDING_WINDOW_MODE, settings.isSlidingWindowMode)
+            .putString(KEY_TIRED_AUDIO_URI, settings.tiredAudioUri)
+            .putString(KEY_SLIGHTLY_TIRED_AUDIO_URI, settings.slightlyTiredAudioUri)
+            // 保存姿态映射 - 逐帧模式
+            .putInt(KEY_FRAME_HEAD_UP_DOWN, driverStateToInt(settings.framePoseMapping.headUpDown))
+            .putInt(KEY_FRAME_HEAD_LEFT_RIGHT, driverStateToInt(settings.framePoseMapping.headLeftRight))
+            .putInt(KEY_FRAME_POSTURE_DEVIATION, driverStateToInt(settings.framePoseMapping.postureDeviation))
+            // 保存姿态映射 - 滑动窗模式
+            .putInt(KEY_SLIDING_HEAD_UP_DOWN, driverStateToInt(settings.slidingPoseMapping.headUpDown))
+            .putInt(KEY_SLIDING_HEAD_LEFT_RIGHT, driverStateToInt(settings.slidingPoseMapping.headLeftRight))
+            .putInt(KEY_SLIDING_POSTURE_DEVIATION, driverStateToInt(settings.slidingPoseMapping.postureDeviation))
+            // 保存关键点阈值
+            .putFloat(KEY_DRAW_THRESHOLD, settings.drawThreshold)
+            .putFloat(KEY_ANALYSIS_THRESHOLD, settings.analysisThreshold)
             .apply()
     }
     
@@ -339,11 +414,16 @@ class MainActivity : AppCompatActivity() {
         
         // 旋转按钮
         binding.btnRotate.setOnClickListener {
+            val oldRotation = viewModel.getManualRotation()
             viewModel.toggleManualRotation()
+            val newRotation = viewModel.getManualRotation()
+            Log.d(TAG, "btnRotate clicked: $oldRotation -> $newRotation")
             // 保存旋转角度到 SharedPreferences
             sharedPreferences.edit()
-                .putInt(KEY_MANUAL_ROTATION, viewModel.getManualRotation())
+                .putInt(KEY_MANUAL_ROTATION, newRotation)
                 .apply()
+            // 触发重绘以应用新的旋转角度
+            binding.overlayView.invalidate()
         }
         
         binding.btnCalibrate.setOnClickListener {
@@ -362,9 +442,11 @@ class MainActivity : AppCompatActivity() {
             frameDataRef.get()?.let { data ->
                 try {
                     // 使用 CoordinateTransform API
+                    val settings = viewModel.getSettingsState()
                     KeypointDrawer.drawKeypointsWithTransform(
                         canvas, data.keypoints, data.imageProxy, binding.previewView,
-                        pointPaint, linePaint, viewModel.getManualRotation(), mirror = true
+                        pointPaint, linePaint, viewModel.getManualRotation(), mirror = true,
+                        confidenceThreshold = settings.drawThreshold
                     )
                 } finally {
                     // 绘制完成后关闭 ImageProxy
@@ -376,21 +458,31 @@ class MainActivity : AppCompatActivity() {
     }
     
     /**
-     * 显示设置弹窗
+     * 显示设置弹窗（自动保存模式）
      */
     private fun showSettingsDialog() {
         val dialogBinding = DialogSettingsBinding.inflate(layoutInflater)
         
         // 加载当前设置
         val currentSettings = viewModel.getSettingsState()
+        Log.d(TAG, "showSettingsDialog: currentSettings.isSlidingWindowMode=${currentSettings.isSlidingWindowMode}")
+        
+        // 标记是否正在初始化（避免初始化时触发自动保存）
+        var isInitializing = true
+        
+        // ===== 初始化各控件的值 =====
         
         // 检测模式
         if (currentSettings.isSlidingWindowMode) {
             dialogBinding.rbModeSliding.isChecked = true
             dialogBinding.layoutWindowDuration.visibility = View.VISIBLE
+            dialogBinding.layoutFramePoseMapping.visibility = View.GONE
+            dialogBinding.layoutSlidingPoseMapping.visibility = View.VISIBLE
         } else {
             dialogBinding.rbModeFrame.isChecked = true
             dialogBinding.layoutWindowDuration.visibility = View.GONE
+            dialogBinding.layoutFramePoseMapping.visibility = View.VISIBLE
+            dialogBinding.layoutSlidingPoseMapping.visibility = View.GONE
         }
         
         // 窗口时长
@@ -439,33 +531,13 @@ class MainActivity : AppCompatActivity() {
         // 疲劳音频 - 先设置 adapter 和 selection
         dialogBinding.spinnerTiredAudio.adapter = audioAdapter
         if (!currentSettings.tiredAudioUri.isNullOrEmpty()) {
-            dialogBinding.spinnerTiredAudio.setSelection(1, false)  // animate=false 避免触发
+            dialogBinding.spinnerTiredAudio.setSelection(1, false)
         }
         
         // 轻度疲劳音频 - 先设置 adapter 和 selection
         dialogBinding.spinnerSlightlyTiredAudio.adapter = audioAdapter
         if (!currentSettings.slightlyTiredAudioUri.isNullOrEmpty()) {
-            dialogBinding.spinnerSlightlyTiredAudio.setSelection(1, false)  // animate=false 避免触发
-        }
-        
-        // 疲劳音频监听器（在 selection 设置之后绑定）
-        dialogBinding.spinnerTiredAudio.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (position == 1) {
-                    requestStoragePermissionAndPickAudio(REQUEST_TIRED_AUDIO)
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        
-        // 轻度疲劳音频监听器（在 selection 设置之后绑定）
-        dialogBinding.spinnerSlightlyTiredAudio.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (position == 1) {
-                    requestStoragePermissionAndPickAudio(REQUEST_SLIGHTLY_TIRED_AUDIO)
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+            dialogBinding.spinnerSlightlyTiredAudio.setSelection(1, false)
         }
         
         // 语言
@@ -475,98 +547,312 @@ class MainActivity : AppCompatActivity() {
             2 -> dialogBinding.rbLanguageEn.isChecked = true
         }
         
+        // 关键点置信度阈值
+        // SeekBar 范围 0-50, 对应阈值 0.3-0.8 (公式: threshold = 0.3 + progress * 0.01)
+        val drawProgress = ((currentSettings.drawThreshold - 0.3f) / 0.01f).toInt().coerceIn(0, 50)
+        val analysisProgress = ((currentSettings.analysisThreshold - 0.3f) / 0.01f).toInt().coerceIn(0, 50)
+        dialogBinding.seekBarDrawThreshold.progress = drawProgress
+        dialogBinding.seekBarAnalysisThreshold.progress = analysisProgress
+        dialogBinding.tvDrawThresholdValue.text = String.format("%.2f", currentSettings.drawThreshold)
+        dialogBinding.tvAnalysisThresholdValue.text = String.format("%.2f", currentSettings.analysisThreshold)
+        
+        // 姿态状态映射 Spinner 初始化
+        val stateOptions = arrayOf(
+            getString(R.string.driver_state_normal),
+            getString(R.string.driver_state_slightly_tired),
+            getString(R.string.driver_state_tired)
+        )
+        val stateAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, stateOptions)
+        stateAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        
+        // 逐帧模式姿态映射
+        dialogBinding.spinnerFrameHeadUpDown.adapter = stateAdapter
+        dialogBinding.spinnerFrameHeadUpDown.setSelection(driverStateToInt(currentSettings.framePoseMapping.headUpDown))
+        
+        dialogBinding.spinnerFrameHeadLeftRight.adapter = stateAdapter
+        dialogBinding.spinnerFrameHeadLeftRight.setSelection(driverStateToInt(currentSettings.framePoseMapping.headLeftRight))
+        
+        dialogBinding.spinnerFramePostureDeviation.adapter = stateAdapter
+        dialogBinding.spinnerFramePostureDeviation.setSelection(driverStateToInt(currentSettings.framePoseMapping.postureDeviation))
+        
+        // 滑动窗模式姿态映射
+        dialogBinding.spinnerSlidingHeadUpDown.adapter = stateAdapter
+        dialogBinding.spinnerSlidingHeadUpDown.setSelection(driverStateToInt(currentSettings.slidingPoseMapping.headUpDown))
+        
+        dialogBinding.spinnerSlidingHeadLeftRight.adapter = stateAdapter
+        dialogBinding.spinnerSlidingHeadLeftRight.setSelection(driverStateToInt(currentSettings.slidingPoseMapping.headLeftRight))
+        
+        dialogBinding.spinnerSlidingPostureDeviation.adapter = stateAdapter
+        dialogBinding.spinnerSlidingPostureDeviation.setSelection(driverStateToInt(currentSettings.slidingPoseMapping.postureDeviation))
+        
+        // 初始化完成
+        isInitializing = false
+        
         val dialog = AlertDialog.Builder(this)
             .setView(dialogBinding.root)
             .create()
         
-        // 检测模式切换
-        dialogBinding.rgDetectionMode.setOnCheckedChangeListener { _, checkedId ->
-            dialogBinding.layoutWindowDuration.visibility = 
-                if (checkedId == R.id.rbModeSliding) View.VISIBLE else View.GONE
+        // ===== 自动保存辅助方法 =====
+        fun autoSaveSettings(andRecreate: Boolean = false) {
+            if (isInitializing) return
+            
+            // 从 ViewModel 获取最新的音频 URI（音频选择器回调已更新）
+            val latestSettings = viewModel.getSettingsState()
+            
+            // 构建姿态映射
+            val framePoseMapping = MainViewModel.PoseStateMapping(
+                headUpDown = intToDriverState(dialogBinding.spinnerFrameHeadUpDown.selectedItemPosition),
+                headLeftRight = intToDriverState(dialogBinding.spinnerFrameHeadLeftRight.selectedItemPosition),
+                postureDeviation = intToDriverState(dialogBinding.spinnerFramePostureDeviation.selectedItemPosition)
+            )
+            
+            val slidingPoseMapping = MainViewModel.PoseStateMapping(
+                headUpDown = intToDriverState(dialogBinding.spinnerSlidingHeadUpDown.selectedItemPosition),
+                headLeftRight = intToDriverState(dialogBinding.spinnerSlidingHeadLeftRight.selectedItemPosition),
+                postureDeviation = intToDriverState(dialogBinding.spinnerSlidingPostureDeviation.selectedItemPosition)
+            )
+            
+            val newSettings = MainViewModel.SettingsState(
+                vibrationEnabled = dialogBinding.switchVibration.isChecked,
+                vibrationMode = dialogBinding.spinnerVibrationMode.selectedItemPosition,
+                audioEnabled = dialogBinding.switchAudio.isChecked,
+                audioVolume = dialogBinding.seekBarVolume.progress,
+                tiredAudioUri = latestSettings.tiredAudioUri,
+                slightlyTiredAudioUri = latestSettings.slightlyTiredAudioUri,
+                windowDurationMs = when {
+                    dialogBinding.rbWindow3s.isChecked -> 3000L
+                    dialogBinding.rbWindow10s.isChecked -> 10000L
+                    else -> 5000L
+                },
+                languageMode = when {
+                    dialogBinding.rbLanguageZh.isChecked -> 1
+                    dialogBinding.rbLanguageEn.isChecked -> 2
+                    else -> 0
+                },
+                isSlidingWindowMode = dialogBinding.rbModeSliding.isChecked,
+                framePoseMapping = framePoseMapping,
+                slidingPoseMapping = slidingPoseMapping,
+                // 关键点阈值: SeekBar progress 0-50 -> threshold 0.3-0.8
+                drawThreshold = 0.3f + dialogBinding.seekBarDrawThreshold.progress * 0.01f,
+                analysisThreshold = 0.3f + dialogBinding.seekBarAnalysisThreshold.progress * 0.01f
+            )
+            
+            saveSettings(newSettings)
+            viewModel.updateSettings(newSettings)
+            
+            if (andRecreate) {
+                Toast.makeText(this, R.string.settings_saved_restart, Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                binding.root.postDelayed({ recreate() }, 150)
+            }
         }
         
-        // 震动开关切换
+        // ===== 设置各控件的监听器（自动保存） =====
+        
+        // 检测模式切换 -> 自动保存
+        dialogBinding.rgDetectionMode.setOnCheckedChangeListener { _, checkedId ->
+            val isSlidingMode = (checkedId == R.id.rbModeSliding)
+            dialogBinding.layoutWindowDuration.visibility = if (isSlidingMode) View.VISIBLE else View.GONE
+            dialogBinding.layoutFramePoseMapping.visibility = if (isSlidingMode) View.GONE else View.VISIBLE
+            dialogBinding.layoutSlidingPoseMapping.visibility = if (isSlidingMode) View.VISIBLE else View.GONE
+            autoSaveSettings()
+        }
+        
+        // 窗口时长切换 -> 自动保存
+        dialogBinding.rgWindowDuration.setOnCheckedChangeListener { _, _ ->
+            autoSaveSettings()
+        }
+        
+        // ===== 姿态映射 Spinner 监听器 =====
+        
+        // 确认选择"正常"的对话框
+        fun confirmNormalSelection(spinner: android.widget.Spinner, originalPosition: Int, onConfirmed: () -> Unit) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.confirm_normal_title)
+                .setMessage(R.string.confirm_normal_message)
+                .setPositiveButton(R.string.yes) { _, _ ->
+                    onConfirmed()
+                    autoSaveSettings()
+                }
+                .setNegativeButton(R.string.no) { _, _ ->
+                    // 恢复原来的选择
+                    spinner.setSelection(originalPosition, false)
+                }
+                .setCancelable(false)
+                .show()
+        }
+        
+        // 逐帧模式姿态映射监听
+        dialogBinding.spinnerFrameHeadUpDown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var firstSelection = true
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (firstSelection) { firstSelection = false; return }
+                if (position == 0) {
+                    confirmNormalSelection(dialogBinding.spinnerFrameHeadUpDown, 2) {}
+                } else {
+                    autoSaveSettings()
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        dialogBinding.spinnerFrameHeadLeftRight.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var firstSelection = true
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (firstSelection) { firstSelection = false; return }
+                if (position == 0) {
+                    confirmNormalSelection(dialogBinding.spinnerFrameHeadLeftRight, 0) {}
+                } else {
+                    autoSaveSettings()
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        dialogBinding.spinnerFramePostureDeviation.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var firstSelection = true
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (firstSelection) { firstSelection = false; return }
+                if (position == 0) {
+                    confirmNormalSelection(dialogBinding.spinnerFramePostureDeviation, 2) {}
+                } else {
+                    autoSaveSettings()
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        // 滑动窗模式姿态映射监听
+        dialogBinding.spinnerSlidingHeadUpDown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var firstSelection = true
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (firstSelection) { firstSelection = false; return }
+                if (position == 0) {
+                    confirmNormalSelection(dialogBinding.spinnerSlidingHeadUpDown, 2) {}
+                } else {
+                    autoSaveSettings()
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        dialogBinding.spinnerSlidingHeadLeftRight.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var firstSelection = true
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (firstSelection) { firstSelection = false; return }
+                if (position == 0) {
+                    confirmNormalSelection(dialogBinding.spinnerSlidingHeadLeftRight, 0) {}
+                } else {
+                    autoSaveSettings()
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        dialogBinding.spinnerSlidingPostureDeviation.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var firstSelection = true
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (firstSelection) { firstSelection = false; return }
+                if (position == 0) {
+                    confirmNormalSelection(dialogBinding.spinnerSlidingPostureDeviation, 2) {}
+                } else {
+                    autoSaveSettings()
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        // 震动开关切换 -> 自动保存
         dialogBinding.switchVibration.setOnCheckedChangeListener { _, isChecked ->
             dialogBinding.layoutVibrationMode.visibility = if (isChecked) View.VISIBLE else View.GONE
+            autoSaveSettings()
         }
         
-        // 音频开关切换
+        // 震动模式选择 -> 自动保存
+        dialogBinding.spinnerVibrationMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                autoSaveSettings()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        // 音频开关切换 -> 自动保存
         dialogBinding.switchAudio.setOnCheckedChangeListener { _, isChecked ->
             val visibility = if (isChecked) View.VISIBLE else View.GONE
             dialogBinding.layoutAudioVolume.visibility = visibility
             dialogBinding.layoutTiredAudio.visibility = visibility
             dialogBinding.layoutSlightlyTiredAudio.visibility = visibility
+            autoSaveSettings()
         }
         
-        // 音量滑块
+        // 音量滑块 -> 松手时自动保存
         dialogBinding.seekBarVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 dialogBinding.tvVolumeValue.text = "$progress%"
             }
             override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                autoSaveSettings()
+            }
         })
         
-        // 取消按钮
+        // 疲劳音频监听器
+        dialogBinding.spinnerTiredAudio.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (position == 1 && viewModel.getSettingsState().tiredAudioUri.isNullOrEmpty()) {
+                    requestStoragePermissionAndPickAudio(REQUEST_TIRED_AUDIO)
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        // 轻度疲劳音频监听器
+        dialogBinding.spinnerSlightlyTiredAudio.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (position == 1 && viewModel.getSettingsState().slightlyTiredAudioUri.isNullOrEmpty()) {
+                    requestStoragePermissionAndPickAudio(REQUEST_SLIGHTLY_TIRED_AUDIO)
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        // 关键点绘制阈值滑块 -> 松手时自动保存
+        dialogBinding.seekBarDrawThreshold.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                val threshold = 0.3f + progress * 0.01f
+                dialogBinding.tvDrawThresholdValue.text = String.format("%.2f", threshold)
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                autoSaveSettings()
+            }
+        })
+        
+        // 关键点分析阈值滑块 -> 松手时自动保存
+        dialogBinding.seekBarAnalysisThreshold.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                val threshold = 0.3f + progress * 0.01f
+                dialogBinding.tvAnalysisThresholdValue.text = String.format("%.2f", threshold)
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {
+                autoSaveSettings()
+            }
+        })
+        
+        // 语言切换 -> 自动保存并重启
+        dialogBinding.rgLanguage.setOnCheckedChangeListener { _, _ ->
+            autoSaveSettings(andRecreate = true)
+        }
+        
+        // 关闭按钮
+        dialogBinding.btnCancel.text = getString(R.string.close)
         dialogBinding.btnCancel.setOnClickListener {
             dialog.dismiss()
         }
         
-        // 保存按钮
-        dialogBinding.btnSave.setOnClickListener {
-            // 检测模式
-            val slidingWindowMode = dialogBinding.rbModeSliding.isChecked
-            
-            // 窗口时长
-            val windowDuration = when {
-                dialogBinding.rbWindow3s.isChecked -> 3000L
-                dialogBinding.rbWindow10s.isChecked -> 10000L
-                else -> 5000L
-            }
-            
-            // 震动模式
-            val vibrationMode = dialogBinding.spinnerVibrationMode.selectedItemPosition
-            
-            // 语言模式
-            val languageMode = when {
-                dialogBinding.rbLanguageZh.isChecked -> 1
-                dialogBinding.rbLanguageEn.isChecked -> 2
-                else -> 0
-            }
-            
-            val newSettings = MainViewModel.SettingsState(
-                vibrationEnabled = dialogBinding.switchVibration.isChecked,
-                vibrationMode = vibrationMode,
-                audioEnabled = dialogBinding.switchAudio.isChecked,
-                audioVolume = dialogBinding.seekBarVolume.progress,
-                tiredAudioUri = currentSettings.tiredAudioUri,
-                slightlyTiredAudioUri = currentSettings.slightlyTiredAudioUri,
-                windowDurationMs = windowDuration,
-                languageMode = languageMode,
-                isSlidingWindowMode = slidingWindowMode
-            )
-            
-            // 如果语言改变，需要重启 Activity
-            if (languageMode != currentSettings.languageMode) {
-                // 保存设置到 SharedPreferences
-                saveSettings(newSettings)
-                viewModel.updateSettings(newSettings)
-                
-                Toast.makeText(this, R.string.settings_saved_restart, Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
-                
-                // 延迟 recreate()，等待 Dialog 完全销毁
-                binding.root.postDelayed({
-                    recreate()
-                }, 150)
-            } else {
-                // 保存设置
-                saveSettings(newSettings)
-                viewModel.updateSettings(newSettings)
-                Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
-            }
-        }
+        // 隐藏保存按钮（已实现自动保存）
+        dialogBinding.btnSave.visibility = View.GONE
         
         dialog.show()
     }
@@ -629,7 +915,8 @@ class MainActivity : AppCompatActivity() {
         binding.tvCalibrationStatus.setTextColor(viewModel.getCalibrationStatusColor())
         
         // 手动旋转角度
-        binding.tvRotation.text = getString(R.string.rotation, state.manualRotation)
+        Log.d(TAG, "updateUI: manualRotation=${state.manualRotation}")
+        binding.tvRotation.text = "${getString(R.string.rotation)}: ${state.manualRotation}°"
         
         // 检测错误信息
         state.detectionError?.let { error ->

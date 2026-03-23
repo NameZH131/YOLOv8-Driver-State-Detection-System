@@ -3,6 +3,7 @@ package com.yolo.driver.analyzer
 import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
+import com.yolo.driver.R
 import com.yolo.driver.data.CalibrationData
 import com.yolo.driver.data.CalibrationThresholds
 import com.yolo.driver.data.CollectedFrame
@@ -35,10 +36,10 @@ class CalibrationManager(private val context: Context) {
     }
     
     // 校准时长选项
-    enum class Duration(val seconds: Int, val displayName: String, val maxFrames: Int) {
-        FAST(2, "快速 (2秒)", 60),
-        NORMAL(3, "标准 (3秒)", 90),
-        ACCURATE(5, "精确 (5秒)", 150)
+    enum class Duration(val seconds: Int, val maxFrames: Int) {
+        FAST(2, 60),
+        NORMAL(3, 90),
+        ACCURATE(5, 150)
     }
     
     // 采集数据结构
@@ -90,14 +91,14 @@ class CalibrationManager(private val context: Context) {
      */
     fun getStateDisplayName(state: State): String {
         return when (state) {
-            State.IDLE -> "等待开始"
-            State.BASE_COLLECT -> "保持正常驾驶姿势"
-            State.HEAD_UP -> "请抬头"
-            State.HEAD_DOWN -> "请低头"
-            State.HEAD_LEFT -> "请向左看"
-            State.HEAD_RIGHT -> "请向右看"
-            State.POSTURE_DEVIATION -> "请左右倾斜身体"
-            State.DONE -> "校准完成"
+            State.IDLE -> context.getString(R.string.calibration_state_idle)
+            State.BASE_COLLECT -> context.getString(R.string.calibration_state_base_collect)
+            State.HEAD_UP -> context.getString(R.string.calibration_action_head_up)
+            State.HEAD_DOWN -> context.getString(R.string.calibration_action_head_down)
+            State.HEAD_LEFT -> context.getString(R.string.calibration_action_look_left)
+            State.HEAD_RIGHT -> context.getString(R.string.calibration_action_look_right)
+            State.POSTURE_DEVIATION -> context.getString(R.string.calibration_action_posture_deviation)
+            State.DONE -> context.getString(R.string.calibration_state_done)
         }
     }
     
@@ -294,7 +295,7 @@ class CalibrationManager(private val context: Context) {
         
         val calibrationData = CalibrationData(
             timestamp = System.currentTimeMillis(),
-            durationSetting = selectedDuration.displayName,
+            durationSetting = "${selectedDuration.seconds}s",
             baseValues = base,
             actionLimits = limits,
             calculatedThresholds = thresholds

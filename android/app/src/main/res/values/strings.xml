@@ -36,6 +36,7 @@
     <string name="reset">Reset</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
     
     <!-- Settings -->
     <string name="settings">Settings</string>
@@ -94,6 +95,37 @@
     <string name="calibration_action_look_right">Look Right</string>
     <string name="calibration_action_posture_deviation">Tilt Body</string>
     <string name="skip">Skip</string>
+    <string name="waiting_to_start">Waiting to start</string>
+    <string name="duration_2s">2s</string>
+    <string name="duration_3s">3s</string>
+    <string name="duration_5s">5s</string>
+    <string name="start_calibration">Start Calibration</string>
     
+    <!-- Pose State Mapping -->
+    <string name="pose_state_mapping">Pose State Mapping</string>
+    <string name="frame_mode_mapping">Frame Mode Mapping</string>
+    <string name="sliding_mode_mapping">Sliding Window Mapping</string>
+    <string name="head_up_down">Head Up/Down</string>
+    <string name="head_left_right">Head Left/Right</string>
+    <string name="posture_deviation">Posture Deviation</string>
+    <string name="pose_to_state">Detect pose → Result state</string>
+    <string name="confirm_normal_title">Confirm Setting</string>
+    <string name="confirm_normal_message">Are you sure you want to set this pose as \"Normal\"? This means the pose will not trigger any fatigue alert.</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
+    
+    <!-- Keypoint Confidence Thresholds -->
+    <string name="keypoint_settings">Keypoint Settings</string>
+    <string name="draw_threshold">Draw Threshold</string>
+    <string name="draw_threshold_desc">Keypoints below this threshold will not be displayed</string>
+    <string name="analysis_threshold">Analysis Threshold</string>
+    <string name="analysis_threshold_desc">Keypoints below this threshold will not be used for pose analysis</string>
+    
+    <!-- Calibration States -->
+    <string name="calibration_state_idle">Waiting to start</string>
+    <string name="calibration_state_base_collect">Keep normal driving posture</string>
+    <string name="calibration_state_done">Calibration complete</string>
+    <string name="calibration_success_message">Calibration successful!</string>
+    <string name="rotation_auto">Auto</string>
 
 </resources>

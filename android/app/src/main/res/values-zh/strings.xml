@@ -18,7 +18,8 @@
     
     <!-- UI Labels -->
     <string name="frame_count">帧: %d</string>
-    <string name="rotation">旋转: %d°</string>
+    <string name="rotation">旋转</string>
+    <string name="rotate">旋转</string>
     <string name="calibrated">已校准</string>
     <string name="not_calibrated">未校准</string>
     
@@ -28,6 +29,7 @@
     <string name="reset">重置</string>
     <string name="save">保存</string>
     <string name="cancel">取消</string>
+    <string name="close">关闭</string>
     
     <!-- Settings -->
     <string name="settings">设置</string>
@@ -68,5 +70,46 @@
     <string name="model_load_failed">模型加载失败</string>
     <string name="reset_success">已重置</string>
     
+    <!-- Calibration -->
+    <string name="calibration_phase_base">保持正常驾驶姿势，正视前方</string>
+    <string name="calibration_phase_action">执行指示的动作</string>
+    <string name="calibration_action_head_up">抬头</string>
+    <string name="calibration_action_head_down">低头</string>
+    <string name="calibration_action_look_left">向左看</string>
+    <string name="calibration_action_look_right">向右看</string>
+    <string name="calibration_action_posture_deviation">身体倾斜</string>
+    <string name="skip">跳过</string>
+    <string name="waiting_to_start">等待开始</string>
+    <string name="duration_2s">2秒</string>
+    <string name="duration_3s">3秒</string>
+    <string name="duration_5s">5秒</string>
+    <string name="start_calibration">开始校准</string>
+    
+    <!-- Pose State Mapping -->
+    <string name="pose_state_mapping">姿态状态映射</string>
+    <string name="frame_mode_mapping">逐帧模式映射</string>
+    <string name="sliding_mode_mapping">滑动窗模式映射</string>
+    <string name="head_up_down">抬头/低头</string>
+    <string name="head_left_right">左右摆头</string>
+    <string name="posture_deviation">坐姿偏移</string>
+    <string name="pose_to_state">检测到姿态 → 结果状态</string>
+    <string name="confirm_normal_title">确认设置</string>
+    <string name="confirm_normal_message">确定要将此姿态设置为"正常"吗？这意味着检测到该姿态时不会触发任何疲劳提醒。</string>
+    <string name="yes">是</string>
+    <string name="no">否</string>
+    
+    <!-- Keypoint Confidence Thresholds -->
+    <string name="keypoint_settings">关键点设置</string>
+    <string name="draw_threshold">绘制阈值</string>
+    <string name="draw_threshold_desc">低于此阈值的关键点将不显示</string>
+    <string name="analysis_threshold">分析阈值</string>
+    <string name="analysis_threshold_desc">低于此阈值的关键点不参与姿态判断</string>
+    
+    <!-- Calibration States -->
+    <string name="calibration_state_idle">等待开始</string>
+    <string name="calibration_state_base_collect">保持正常驾驶姿势</string>
+    <string name="calibration_state_done">校准完成</string>
+    <string name="calibration_success_message">校准成功!</string>
+    <string name="rotation_auto">自动</string>
 
 </resources>

@@ -31,7 +31,7 @@ class CalibrationViewModel(
     // UI 状态
     data class UiState(
         val state: CalibrationManager.State = CalibrationManager.State.IDLE,
-        val stateDisplayName: String = "等待开始",
+        val stateDisplayName: String = "",  // 由 CalibrationManager 提供
         val duration: CalibrationManager.Duration = CalibrationManager.Duration.NORMAL,
         val countdownSeconds: Float = 0f,
         val progress: Int = 0,
@@ -40,7 +40,7 @@ class CalibrationViewModel(
         val isCompleted: Boolean = false,
         val canStart: Boolean = true,
         val errorMessage: String? = null,
-        val manualRotation: Int = -1  // 手动旋转角度 (-1=自动, 0, 90, 180, 270)
+        val manualRotation: Int = 0  // 手动旋转角度 (0, 90, 180, 270)，与 MainActivity 保持一致
     )
     
     private val _uiState = MutableStateFlow(UiState())
@@ -139,7 +139,7 @@ class CalibrationViewModel(
             countdownJob?.cancel()
             _uiState.value = _uiState.value.copy(
                 state = CalibrationManager.State.DONE,
-                stateDisplayName = "校准完成!",
+                stateDisplayName = calibrationManager.getStateDisplayName(CalibrationManager.State.DONE),
                 isCalibrating = false,
                 isCompleted = true,
                 canStart = true
@@ -171,23 +171,24 @@ class CalibrationViewModel(
     }
     
     /**
-     * 切换手动旋转角度
+     * 切换手动旋转角度 (0 -> 90 -> 180 -> 270 -> 360 -> 0)
      */
     fun toggleManualRotation() {
-        val current = _uiState.value.manualRotation
-        val newRotation = when (current) {
-            -1 -> 0
+        val oldRotation = _uiState.value.manualRotation
+        // 支持 360 度，循环：0 -> 90 -> 180 -> 270 -> 360 -> 0
+        val newRotation = when (oldRotation) {
             0 -> 90
             90 -> 180
             180 -> 270
-            270 -> -1
-            else -> -1
+            270 -> 360
+            else -> 0  // 360 或其他值回到 0
         }
         _uiState.value = _uiState.value.copy(manualRotation = newRotation)
         // 保存到 SharedPreferences
         sharedPreferences.edit()
             .putInt(KEY_MANUAL_ROTATION, newRotation)
             .apply()
+        android.util.Log.d("CalibrationViewModel", "toggleManualRotation: $oldRotation -> $newRotation, uiState.manualRotation=${_uiState.value.manualRotation}")
     }
     
     /**
@@ -227,7 +228,7 @@ class CalibrationViewModel(
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             val appContext = context.applicationContext
             val calibrationManager = CalibrationManager(appContext)
-            val sharedPreferences = appContext.getSharedPreferences("driver_settings", Context.MODE_PRIVATE)
+            val sharedPreferences = appContext.getSharedPreferences("driver_monitor_prefs", Context.MODE_PRIVATE)
             return CalibrationViewModel(calibrationManager, sharedPreferences) as T
         }
     }

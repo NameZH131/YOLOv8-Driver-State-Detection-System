@@ -58,6 +58,7 @@ object KeypointDrawer {
      * @param linePaint 线绘制配置
      * @param manualRotation 手动旋转角度 (0/90/180/270)
      * @param mirror 是否镜像（前置摄像头）
+     * @param confidenceThreshold 置信度阈值，低于此值的关键点不绘制
      */
     @androidx.camera.core.ExperimentalGetImage
     fun drawKeypoints(
@@ -69,7 +70,8 @@ object KeypointDrawer {
         pointPaint: Paint = DEFAULT_POINT_PAINT,
         linePaint: Paint = DEFAULT_LINE_PAINT,
         manualRotation: Int = 0,
-        mirror: Boolean = true
+        mirror: Boolean = true,
+        confidenceThreshold: Float = 0.5f
     ) {
         if (keypoints.isEmpty()) return
         
@@ -77,13 +79,20 @@ object KeypointDrawer {
         val imageWidth = imageProxy.width
         val imageHeight = imageProxy.height
         
-        Log.d(TAG, "drawKeypoints: image=${imageWidth}x${imageHeight}, view=${viewWidth}x${viewHeight}, rotation=$manualRotation, mirror=$mirror")
+        // 获取相机旋转角度（系统提供）
+        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+        
+        // 直接使用手动旋转值（支持 0/90/180/270/360）
+        // 360 和 0 效果相同
+        val effectiveRotation = if (manualRotation == 360) 0 else manualRotation
+        
+        Log.d(TAG, "drawKeypoints: manualRotation=$manualRotation, rotationDegrees=$rotationDegrees, effectiveRotation=$effectiveRotation, image=${imageWidth}x${imageHeight}, view=${viewWidth}x${viewHeight}")
         
         // 根据旋转角度确定显示尺寸
         // rotation 0/180: 显示尺寸 = 图像尺寸
         // rotation 90/270: 显示尺寸 = 图像尺寸交换 (width <-> height)
-        val displayWidth = if (manualRotation == 90 || manualRotation == 270) imageHeight else imageWidth
-        val displayHeight = if (manualRotation == 90 || manualRotation == 270) imageWidth else imageHeight
+        val displayWidth = if (effectiveRotation == 90 || effectiveRotation == 270) imageHeight else imageWidth
+        val displayHeight = if (effectiveRotation == 90 || effectiveRotation == 270) imageWidth else imageHeight
         
         // 计算缩放比例（保持宽高比）
         val scaleX = viewWidth.toFloat() / displayWidth
@@ -100,12 +109,12 @@ object KeypointDrawer {
         
         // 转换坐标
         val transformedPoints = keypoints.mapIndexed { index, kp ->
-            if (kp.confidence > 0.5f) {
+            if (kp.confidence >= confidenceThreshold) {
                 // 1. 先根据旋转角度转换坐标
                 var x: Float
                 var y: Float
                 
-                when (manualRotation) {
+                when (effectiveRotation) {
                     90 -> {
                         // 顺时针90度: (x, y) -> (height - y, x)
                         x = imageHeight - kp.y
@@ -137,7 +146,7 @@ object KeypointDrawer {
                 x = x * scale + offsetX
                 y = y * scale + offsetY
                 
-                Log.d(TAG, "KP$index: (${kp.x}, ${kp.y}) --rot$manualRotation--> ($x, $y)")
+                Log.d(TAG, "KP$index: (${kp.x}, ${kp.y}) --rot$effectiveRotation--> ($x, $y)")
                 Pair(x, y)
             } else {
                 null
@@ -175,12 +184,13 @@ object KeypointDrawer {
         pointPaint: Paint = DEFAULT_POINT_PAINT,
         linePaint: Paint = DEFAULT_LINE_PAINT,
         manualRotation: Int = 0,
-        mirror: Boolean = true
+        mirror: Boolean = true,
+        confidenceThreshold: Float = 0.5f
     ) {
         drawKeypoints(
             canvas, keypoints, imageProxy,
             previewView.width, previewView.height,
-            pointPaint, linePaint, manualRotation, mirror
+            pointPaint, linePaint, manualRotation, mirror, confidenceThreshold
         )
     }
 }

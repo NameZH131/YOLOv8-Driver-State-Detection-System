@@ -13,6 +13,7 @@
         android:id="@+id/previewView"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        app:scaleType="fitCenter"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -49,7 +50,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="等待开始"
+        android:text="@string/waiting_to_start"
         android:textColor="#FFFFFF"
         android:textSize="28sp"
         android:textStyle="bold"
@@ -104,7 +105,7 @@
             style="?android:attr/buttonBarButtonStyle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="2秒"
+            android:text="@string/duration_2s"
             android:textColor="#FFFFFF" />
 
         <Button
@@ -112,7 +113,7 @@
             style="?android:attr/buttonBarButtonStyle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="3秒"
+            android:text="@string/duration_3s"
             android:textColor="#FFFFFF" />
 
         <Button
@@ -120,7 +121,7 @@
             style="?android:attr/buttonBarButtonStyle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="5秒"
+            android:text="@string/duration_5s"
             android:textColor="#FFFFFF" />
 
     </LinearLayout>
@@ -144,7 +145,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginEnd="8dp"
-            android:text="旋转+90°"
+            android:text="@string/rotate_90"
             android:textColor="#FFFFFF" />
 
         <Button
@@ -152,13 +153,13 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginEnd="16dp"
-            android:text="开始校准" />
+            android:text="@string/start_calibration" />
 
         <Button
             android:id="@+id/btnCancel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="取消" />
+            android:text="@string/cancel" />
 
     </LinearLayout>
 

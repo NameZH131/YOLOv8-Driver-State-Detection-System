@@ -36,7 +36,8 @@ import com.yolo.driver.util.CameraUtils
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = viewModel(),
-    onNavigateToCalibration: () -> Unit = {}
+    onNavigateToCalibration: () -> Unit = {},
+    onSaveSettings: (MainViewModel.SettingsState) -> Unit = {}
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
@@ -97,7 +98,7 @@ fun MainScreen(
         imageProxy.close()
     }
     
-    DriverMonitorTheme {
+    DriverMonitorTheme(darkTheme = true) {
         Box(modifier = Modifier.fillMaxSize()) {
             // 相机预览
             CameraPreview(
@@ -149,6 +150,7 @@ fun MainScreen(
                     onDismiss = { showSettingsDialog = false },
                     onSave = { newSettings ->
                         viewModel.updateSettings(newSettings)
+                        onSaveSettings(newSettings)
                         showSettingsDialog = false
                     }
                 )

@@ -61,7 +61,7 @@
             android:id="@+id/tvDriverState"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="正常"
+            android:text="@string/driver_state_normal"
             android:textColor="#00FF00"
             android:textSize="24sp"
             android:textStyle="bold" />
@@ -72,7 +72,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="正视前方"
+            android:text="@string/head_pose_facing_forward"
             android:textColor="#FFFFFF"
             android:textSize="14sp" />
 
@@ -82,7 +82,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="未校准"
+            android:text="@string/not_calibrated"
             android:textColor="#FFFF00"
             android:textSize="12sp" />
 
@@ -92,7 +92,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="帧: 0"
+            android:text="@string/frame_count"
             android:textColor="#888888"
             android:textSize="10sp" />
 
@@ -102,7 +102,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="旋转: 0°"
+            android:text="@string/rotation"
             android:textColor="#00FFFF"
             android:textSize="12sp" />
 
@@ -126,20 +126,20 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginEnd="8dp"
-            android:text="旋转+90°" />
+            android:text="@string/rotate_90" />
 
         <Button
             android:id="@+id/btnCalibrate"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginEnd="8dp"
-            android:text="校准" />
+            android:text="@string/calibrate" />
 
         <Button
             android:id="@+id/btnReset"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="重置" />
+            android:text="@string/reset" />
 
     </LinearLayout>
 
