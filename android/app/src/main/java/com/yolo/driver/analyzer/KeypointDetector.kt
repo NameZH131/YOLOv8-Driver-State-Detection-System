@@ -132,6 +132,7 @@ class KeypointDetector private constructor() {
         val confidence: Float
     )
     
+    @Volatile
     private var isInitialized = false
     
     /**

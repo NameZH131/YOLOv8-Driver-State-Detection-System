@@ -1,6 +1,7 @@
 package com.yolo.driver.ui
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -19,8 +20,13 @@ import kotlinx.coroutines.launch
  * 管理校准状态机、倒计时和帧采集
  */
 class CalibrationViewModel(
-    private val calibrationManager: CalibrationManager
+    private val calibrationManager: CalibrationManager,
+    private val sharedPreferences: SharedPreferences
 ) : ViewModel() {
+    
+    companion object {
+        private const val KEY_MANUAL_ROTATION = "manual_rotation"
+    }
     
     // UI 状态
     data class UiState(
@@ -33,7 +39,8 @@ class CalibrationViewModel(
         val isCalibrating: Boolean = false,
         val isCompleted: Boolean = false,
         val canStart: Boolean = true,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val manualRotation: Int = -1  // 手动旋转角度 (-1=自动, 0, 90, 180, 270)
     )
     
     private val _uiState = MutableStateFlow(UiState())
@@ -164,6 +171,39 @@ class CalibrationViewModel(
     }
     
     /**
+     * 切换手动旋转角度
+     */
+    fun toggleManualRotation() {
+        val current = _uiState.value.manualRotation
+        val newRotation = when (current) {
+            -1 -> 0
+            0 -> 90
+            90 -> 180
+            180 -> 270
+            270 -> -1
+            else -> -1
+        }
+        _uiState.value = _uiState.value.copy(manualRotation = newRotation)
+        // 保存到 SharedPreferences
+        sharedPreferences.edit()
+            .putInt(KEY_MANUAL_ROTATION, newRotation)
+            .apply()
+    }
+    
+    /**
+     * 获取当前手动旋转角度
+     */
+    fun getManualRotation(): Int = _uiState.value.manualRotation
+    
+    /**
+     * 从 SharedPreferences 加载旋转角度
+     */
+    fun loadManualRotation() {
+        val rotation = sharedPreferences.getInt(KEY_MANUAL_ROTATION, 0)
+        _uiState.value = _uiState.value.copy(manualRotation = rotation)
+    }
+    
+    /**
      * 重置状态
      */
     fun reset() {
@@ -185,8 +225,10 @@ class CalibrationViewModel(
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val calibrationManager = CalibrationManager(context.applicationContext)
-            return CalibrationViewModel(calibrationManager) as T
+            val appContext = context.applicationContext
+            val calibrationManager = CalibrationManager(appContext)
+            val sharedPreferences = appContext.getSharedPreferences("driver_settings", Context.MODE_PRIVATE)
+            return CalibrationViewModel(calibrationManager, sharedPreferences) as T
         }
     }
 }

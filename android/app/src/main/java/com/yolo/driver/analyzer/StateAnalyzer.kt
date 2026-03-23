@@ -5,6 +5,7 @@ import com.yolo.driver.analyzer.KeypointDetector.KeyPoint
 import com.yolo.driver.data.CalibrationData
 import com.yolo.driver.data.CalibrationThresholds
 import kotlin.math.abs
+import kotlin.math.pow
 
 /**
  * 驾驶员状态分析器
@@ -69,6 +70,10 @@ class StateAnalyzer {
         postureDeviation = 33f
     )
     
+    // 滑动窗口参数
+    private val fatigueScoreWindow = ArrayDeque<Float>(30)
+    private val maxWindowSize = 30  // 约一秒的帧数
+    
     // 状态变量
     private var tiredFrameCount = 0f
     private var frameCount = 0
@@ -89,27 +94,27 @@ class StateAnalyzer {
     fun analyze(keypoints: List<KeyPoint>?): AnalysisResult {
         frameCount++
         
-        if (keypoints == null || keypoints.size < 17) {
-            tiredFrameCount += UNKNOWN_STATE_SCORE
-            return buildResult(emptySet())
+        // 计算当前帧疲劳评分
+        val currentScore = calculateFrameScore(keypoints)
+        
+        // 滑动窗口累积
+        fatigueScoreWindow.addLast(currentScore)
+        if (fatigueScoreWindow.size > maxWindowSize) {
+            fatigueScoreWindow.removeFirst()
         }
         
-        // 分析头部姿态
-        val headPoses = analyzeHeadPose(keypoints)
-        
-        // 疲劳评分累积
+        // 计算累积疲劳评分（带衰减因子）
+        val decayFactor = 0.95f  // 衰减因子，近期帧权重更高
         tiredFrameCount = 0f
+        fatigueScoreWindow.reversed().forEachIndexed { index, score ->
+            tiredFrameCount += score * (decayFactor.pow(index))
+        }
         
-        if (headPoses.contains(HeadPose.HEAD_DOWN) || headPoses.contains(HeadPose.HEAD_UP)) {
-            tiredFrameCount += HEAD_POSE_SCORE
-        }
-        if (headPoses.contains(HeadPose.POSTURE_DEVIATION)) {
-            tiredFrameCount += POSTURE_DEVIATION_SCORE
-        }
-        if (headPoses.isEmpty() || 
-            (headPoses.size == 1 && headPoses.contains(HeadPose.FACING_FORWARD))) {
-            // 正常状态，重置计数
-            tiredFrameCount = 0f
+        // 分析头部姿态（用于 UI 显示）
+        val headPoses = if (keypoints != null && keypoints.size >= 17) {
+            analyzeHeadPose(keypoints)
+        } else {
+            emptySet()
         }
         
         // 判断疲劳状态
@@ -121,6 +126,32 @@ class StateAnalyzer {
         
         return buildResult(headPoses)
     }
+    
+    /**
+     * 计算单帧疲劳评分
+     */
+    private fun calculateFrameScore(keypoints: List<KeyPoint>?): Float {
+        if (keypoints == null || keypoints.size < 17) {
+            return UNKNOWN_STATE_SCORE
+        }
+        
+        val headPoses = analyzeHeadPose(keypoints)
+        var score = 0f
+        
+        if (headPoses.contains(HeadPose.HEAD_DOWN) || headPoses.contains(HeadPose.HEAD_UP)) {
+            score += HEAD_POSE_SCORE
+        }
+        if (headPoses.contains(HeadPose.POSTURE_DEVIATION)) {
+            score += POSTURE_DEVIATION_SCORE
+        }
+        
+        return score
+    }
+    
+    /**
+     * Float 的 pow 扩展函数
+     */
+    private fun Float.pow(exp: Int): Float = this.toDouble().pow(exp.toDouble()).toFloat()
     
     /**
      * 分析头部姿态
@@ -207,6 +238,7 @@ class StateAnalyzer {
         tiredFrameCount = 0f
         frameCount = 0
         driverState = DriverState.NORMAL
+        fatigueScoreWindow.clear()
     }
     
     /**

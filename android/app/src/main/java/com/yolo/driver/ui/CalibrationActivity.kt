@@ -1,7 +1,9 @@
 package com.yolo.driver.ui
 
+import android.content.Context
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -12,6 +14,7 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.yolo.driver.DriverApplication
 import com.yolo.driver.analyzer.CalibrationManager
 import com.yolo.driver.analyzer.KeypointDetector
 import com.yolo.driver.databinding.ActivityCalibrationBinding
@@ -28,12 +31,18 @@ class CalibrationActivity : AppCompatActivity() {
         private const val TAG = "CalibrationActivity"
     }
     
+    override fun attachBaseContext(newBase: Context) {
+        // 使用 newBase 获取 application，而不是 applicationContext（此时可能为 null）
+        val app = newBase.applicationContext as? DriverApplication
+        val context = app?.applyLanguageToContext(newBase) ?: newBase
+        super.attachBaseContext(context)
+    }
+    
     // 帧数据容器（线程安全）
+    // 注意：imageProxy 需要在绘制完成后关闭
     private data class FrameData(
         val keypoints: List<KeypointDetector.KeyPoint>,
-        val width: Int,
-        val height: Int,
-        val rotation: Int
+        val imageProxy: ImageProxy
     )
     
     private lateinit var binding: ActivityCalibrationBinding
@@ -82,6 +91,7 @@ class CalibrationActivity : AppCompatActivity() {
         
         setupUI()
         observeViewModel()
+        viewModel.loadManualRotation()  // 从 SharedPreferences 加载旋转角度
         
         if (CameraUtils.hasCameraPermission(this)) {
             startCamera()
@@ -100,6 +110,11 @@ class CalibrationActivity : AppCompatActivity() {
             viewModel.setDuration(CalibrationManager.Duration.ACCURATE)
         }
         
+        // 旋转按钮
+        binding.btnRotate.setOnClickListener {
+            viewModel.toggleManualRotation()
+        }
+        
         // 开始校准
         binding.btnStartCalibration.setOnClickListener {
             viewModel.startCalibration()
@@ -112,13 +127,20 @@ class CalibrationActivity : AppCompatActivity() {
         }
         
         // 设置关键点绘制回调
+        @androidx.camera.core.ExperimentalGetImage
         binding.overlayView.setKeypointDrawCallback { canvas, viewWidth, viewHeight ->
             frameDataRef.get()?.let { data ->
-                KeypointDrawer.drawKeypoints(
-                    canvas, data.keypoints, data.width, data.height,
-                    data.rotation, viewWidth, viewHeight,
-                    pointPaint, linePaint
-                )
+                try {
+                    // 使用 CoordinateTransform API
+                    KeypointDrawer.drawKeypointsWithTransform(
+                        canvas, data.keypoints, data.imageProxy, binding.previewView,
+                        pointPaint, linePaint, viewModel.getManualRotation(), mirror = true
+                    )
+                } finally {
+                    // 绘制完成后关闭 ImageProxy
+                    data.imageProxy.close()
+                    frameDataRef.set(null)
+                }
             }
         }
     }
@@ -136,6 +158,10 @@ class CalibrationActivity : AppCompatActivity() {
         binding.btnDuration2s.isSelected = state.duration == CalibrationManager.Duration.FAST
         binding.btnDuration3s.isSelected = state.duration == CalibrationManager.Duration.NORMAL
         binding.btnDuration5s.isSelected = state.duration == CalibrationManager.Duration.ACCURATE
+        
+        // 更新旋转按钮文本
+        val rotationText = if (state.manualRotation == -1) "自动" else "${state.manualRotation}°"
+        binding.btnRotate.text = "旋转: $rotationText"
         
         // 更新状态文本
         binding.tvState.text = state.stateDisplayName
@@ -228,15 +254,17 @@ class CalibrationActivity : AppCompatActivity() {
             return
         }
         
+        // 关闭上一帧的 ImageProxy（如果有）
+        frameDataRef.getAndSet(null)?.imageProxy?.close()
+        
         try {
             val nv21 = CameraUtils.imageProxyToNV21(imageProxy, nv21Buffer)
             nv21Buffer = nv21
-            val rotation = imageProxy.imageInfo.rotationDegrees
             val result = detector?.detect(nv21, imageProxy.width, imageProxy.height)
             
-            // 保存帧数据（线程安全）
+            // 保存帧数据（包含 ImageProxy，绘制后关闭）
             result?.keypoints?.let { kps ->
-                frameDataRef.set(FrameData(kps, imageProxy.width, imageProxy.height, rotation))
+                frameDataRef.set(FrameData(kps, imageProxy))
                 
                 // 更新覆盖层
                 runOnUiThread {
@@ -246,10 +274,17 @@ class CalibrationActivity : AppCompatActivity() {
             
             // 通过 ViewModel 处理帧数据
             viewModel.processFrame(result?.keypoints)
+            
+            // 如果没有关键点，立即关闭
+            if (result?.keypoints == null) {
+                imageProxy.close()
+                frameDataRef.set(null)
+            }
+            
         } catch (e: Exception) {
             Log.e(TAG, "Frame processing error", e)
-        } finally {
             imageProxy.close()
+            frameDataRef.set(null)
         }
     }
     

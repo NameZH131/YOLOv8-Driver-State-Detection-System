@@ -1,19 +1,23 @@
 package com.yolo.driver
 
+import android.content.Context
 import android.graphics.Color
+import android.net.Uri
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.yolo.driver.analyzer.CalibrationManager
 import com.yolo.driver.analyzer.KeypointDetector
+import com.yolo.driver.analyzer.SlidingWindowAnalyzer
 import com.yolo.driver.analyzer.StateAnalyzer
+import com.yolo.driver.util.AudioPlayer
+import com.yolo.driver.util.VibrationController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 /**
+ * @writer: zhangheng
  * 主界面 ViewModel
- * 管理驾驶员状态、校准状态等业务逻辑
+ * 管理驾驶员状态、校准状态、滑动窗分析、音频/震动控制等业务逻辑
  */
 class MainViewModel : ViewModel() {
     
@@ -24,11 +28,11 @@ class MainViewModel : ViewModel() {
         object Tired : DriverState()
     }
     
-    // 获取状态显示名称
-    fun getDriverStateDisplayName(state: DriverState): String = when (state) {
-        is DriverState.Normal -> "正常"
-        is DriverState.SlightlyTired -> "轻度疲劳"
-        is DriverState.Tired -> "疲劳"
+    // 获取状态显示名称 (由外部提供 Context 以支持国际化)
+    fun getDriverStateDisplayName(context: Context, state: DriverState): String = when (state) {
+        is DriverState.Normal -> context.getString(R.string.driver_state_normal)
+        is DriverState.SlightlyTired -> context.getString(R.string.driver_state_slightly_tired)
+        is DriverState.Tired -> context.getString(R.string.driver_state_tired)
     }
     
     // 获取状态颜色
@@ -38,6 +42,19 @@ class MainViewModel : ViewModel() {
         is DriverState.Tired -> Color.RED
     }
     
+    // 设置状态
+    data class SettingsState(
+        val vibrationEnabled: Boolean = false,      // 震动开关，默认关闭
+        val vibrationMode: Int = 0,                 // 震动模式: 0=短震, 1=长震, 2=双击, 3=脉冲
+        val audioEnabled: Boolean = true,           // 音频开关，默认开启
+        val audioVolume: Int = 100,                 // 音量 0-100
+        val tiredAudioUri: String? = null,          // 自定义疲劳音频 URI
+        val slightlyTiredAudioUri: String? = null,  // 自定义轻度疲劳音频 URI
+        val windowDurationMs: Long = 5000L,         // 滑动窗时长，默认5秒
+        val languageMode: Int = 0,                  // 语言模式: 0=自动, 1=中文, 2=英文
+        val isSlidingWindowMode: Boolean = false    // 检测模式: false=逐帧检测, true=滑动窗模式
+    )
+    
     // UI 状态
     data class UiState(
         val driverState: DriverState = DriverState.Normal,
@@ -46,8 +63,10 @@ class MainViewModel : ViewModel() {
         val isCalibrated: Boolean = false,
         val manualRotation: Int = 0,
         val errorMessage: String? = null,
-        val detectionError: String? = null,  // 检测错误信息
-        val noPersonCount: Int = 0  // 连续未检测到人物的帧数
+        val detectionError: String? = null,
+        val noPersonCount: Int = 0,
+        val settingsState: SettingsState = SettingsState(),
+        val windowFrameCount: Int = 0               // 滑动窗内帧数
     )
     
     private val _uiState = MutableStateFlow(UiState())
@@ -56,6 +75,18 @@ class MainViewModel : ViewModel() {
     // 分析器（由 Activity 注入）
     private var analyzer: StateAnalyzer? = null
     private var calibrationManager: CalibrationManager? = null
+    
+    // 滑动窗分析器
+    private var slidingWindowAnalyzer: SlidingWindowAnalyzer = SlidingWindowAnalyzer(5000L)
+    
+    // 音频播放器 (由 Activity 注入 Context)
+    private var audioPlayer: AudioPlayer? = null
+    
+    // 震动控制器 (由 Activity 注入 Context)
+    private var vibrationController: VibrationController? = null
+    
+    // 上一次触发的状态 (用于避免重复播放)
+    private var lastTriggeredState: DriverState = DriverState.Normal
     
     /**
      * 初始化分析器
@@ -67,35 +98,102 @@ class MainViewModel : ViewModel() {
     }
     
     /**
+     * 初始化音频和震动控制器
+     */
+    fun initMediaControllers(context: Context) {
+        audioPlayer = AudioPlayer(context)
+        vibrationController = VibrationController(context)
+        
+        // 应用当前设置
+        val settings = _uiState.value.settingsState
+        vibrationController?.setEnabled(settings.vibrationEnabled)
+        vibrationController?.setMode(settings.vibrationMode)
+        audioPlayer?.setEnabled(settings.audioEnabled)
+        audioPlayer?.setVolume(settings.audioVolume)
+        
+        // 设置自定义音频 Uri
+        settings.tiredAudioUri?.let { audioPlayer?.setTiredAudioUri(Uri.parse(it)) }
+        settings.slightlyTiredAudioUri?.let { audioPlayer?.setSlightlyTiredAudioUri(Uri.parse(it)) }
+    }
+    
+    /**
      * 处理分析结果
      */
     fun processAnalysis(analysis: StateAnalyzer.AnalysisResult?) {
         analysis?.let { a ->
-            val driverState = when (a.driverState) {
-                StateAnalyzer.DriverState.NORMAL -> DriverState.Normal
-                StateAnalyzer.DriverState.SLIGHTLY_TIRED -> DriverState.SlightlyTired
-                StateAnalyzer.DriverState.TIRED -> DriverState.Tired
-            }
-            
-            val headPoses = a.headPoses.map { pose ->
-                when (pose) {
-                    StateAnalyzer.HeadPose.FACING_FORWARD -> "正视前方"
-                    StateAnalyzer.HeadPose.HEAD_UP -> "抬头"
-                    StateAnalyzer.HeadPose.HEAD_DOWN -> "低头"
-                    StateAnalyzer.HeadPose.HEAD_OFFSET -> "头部偏移"
-                    StateAnalyzer.HeadPose.HEAD_TURNED -> "侧脸"
-                    StateAnalyzer.HeadPose.POSTURE_DEVIATION -> "坐姿倾斜"
+            // 根据检测模式处理
+            val driverState = if (_uiState.value.settingsState.isSlidingWindowMode) {
+                // 滑动窗模式：添加到窗口并获取聚合结果
+                slidingWindowAnalyzer.addState(a)
+                val aggregatedResult = slidingWindowAnalyzer.getAggregatedState()
+                
+                // 更新窗口帧数
+                _uiState.value = _uiState.value.copy(
+                    windowFrameCount = aggregatedResult.windowSize
+                )
+                
+                // 转换状态
+                when (aggregatedResult.driverState) {
+                    StateAnalyzer.DriverState.NORMAL -> DriverState.Normal
+                    StateAnalyzer.DriverState.SLIGHTLY_TIRED -> DriverState.SlightlyTired
+                    StateAnalyzer.DriverState.TIRED -> DriverState.Tired
+                }
+            } else {
+                // 逐帧检测模式：直接使用单帧结果
+                _uiState.value = _uiState.value.copy(windowFrameCount = 0)
+                
+                when (a.driverState) {
+                    StateAnalyzer.DriverState.NORMAL -> DriverState.Normal
+                    StateAnalyzer.DriverState.SLIGHTLY_TIRED -> DriverState.SlightlyTired
+                    StateAnalyzer.DriverState.TIRED -> DriverState.Tired
                 }
             }
             
+            // 转换头部姿态 (需要 Context，由 Activity 处理国际化)
+            val headPoses = a.headPoses.map { pose ->
+                pose.name  // 使用枚举名称，Activity 会转换
+            }
+            
+            // 更新 UI 状态
             _uiState.value = _uiState.value.copy(
                 driverState = driverState,
                 headPoses = headPoses,
                 frameCount = a.frameCount,
-                detectionError = null,  // 清除错误
-                noPersonCount = 0  // 重置计数
+                detectionError = null,
+                noPersonCount = 0
             )
+            
+            // 触发音频和震动
+            triggerAlerts(driverState)
         }
+    }
+    
+    /**
+     * 触发音频和震动提醒
+     */
+    private fun triggerAlerts(newState: DriverState) {
+        // 避免重复触发相同状态
+        if (newState == lastTriggeredState && newState == DriverState.Normal) {
+            return
+        }
+        
+        when (newState) {
+            is DriverState.Tired -> {
+                // 疲劳状态：播放疲劳音频，触发当前模式的震动
+                audioPlayer?.playTired()
+                vibrationController?.vibrate()
+            }
+            is DriverState.SlightlyTired -> {
+                // 轻度疲劳：播放轻度疲劳音频，触发当前模式的震动
+                audioPlayer?.playSlightlyTired()
+                vibrationController?.vibrate()
+            }
+            is DriverState.Normal -> {
+                // 正常状态：不播放音频
+            }
+        }
+        
+        lastTriggeredState = newState
     }
     
     /**
@@ -104,7 +202,6 @@ class MainViewModel : ViewModel() {
     fun processDetectResult(result: KeypointDetector.DetectResult) {
         when (result) {
             is KeypointDetector.DetectResult.Success -> {
-                // 清除错误状态
                 _uiState.value = _uiState.value.copy(
                     detectionError = null,
                     noPersonCount = 0
@@ -116,9 +213,8 @@ class MainViewModel : ViewModel() {
                     else -> _uiState.value.noPersonCount
                 }
                 
-                // 只在连续多次未检测到人物时显示错误
                 val showError = when (result.error) {
-                    KeypointDetector.DetectError.NO_PERSON -> newNoPersonCount > 30  // 约1秒
+                    KeypointDetector.DetectError.NO_PERSON -> newNoPersonCount > 30
                     KeypointDetector.DetectError.NOT_INITIALIZED -> true
                     else -> false
                 }
@@ -148,12 +244,21 @@ class MainViewModel : ViewModel() {
     }
     
     /**
+     * 设置手动旋转角度
+     */
+    fun setManualRotation(rotation: Int) {
+        _uiState.value = _uiState.value.copy(manualRotation = rotation)
+    }
+    
+    /**
      * 重置状态
      */
     fun reset() {
         analyzer?.reset()
         calibrationManager?.clearCalibration()
         analyzer?.clearCalibration()
+        slidingWindowAnalyzer.clear()
+        lastTriggeredState = DriverState.Normal
         _uiState.value = UiState()
     }
     
@@ -177,12 +282,138 @@ class MainViewModel : ViewModel() {
     fun getManualRotation(): Int = _uiState.value.manualRotation
     
     /**
-     * 获取校准状态文本
+     * 获取校准状态文本 (由 Activity 提供国际化)
      */
-    fun getCalibrationStatusText(): String = if (_uiState.value.isCalibrated) "已校准" else "未校准"
+    fun getCalibrationStatusText(context: Context): String = 
+        if (_uiState.value.isCalibrated) context.getString(R.string.calibrated) 
+        else context.getString(R.string.not_calibrated)
     
     /**
      * 获取校准状态颜色
      */
     fun getCalibrationStatusColor(): Int = if (_uiState.value.isCalibrated) Color.GREEN else Color.YELLOW
+    
+    // ========== 设置相关方法 ==========
+    
+    /**
+     * 更新设置状态
+     */
+    fun updateSettings(newSettings: SettingsState) {
+        // 更新震动控制器
+        vibrationController?.setEnabled(newSettings.vibrationEnabled)
+        vibrationController?.setMode(newSettings.vibrationMode)
+        
+        // 更新音频控制器
+        audioPlayer?.setEnabled(newSettings.audioEnabled)
+        audioPlayer?.setVolume(newSettings.audioVolume)
+        
+        // 更新自定义音频 Uri
+        newSettings.tiredAudioUri?.let { audioPlayer?.setTiredAudioUri(Uri.parse(it)) }
+        newSettings.slightlyTiredAudioUri?.let { audioPlayer?.setSlightlyTiredAudioUri(Uri.parse(it)) }
+        
+        // 更新滑动窗时长
+        if (newSettings.windowDurationMs != _uiState.value.settingsState.windowDurationMs) {
+            slidingWindowAnalyzer = SlidingWindowAnalyzer(newSettings.windowDurationMs)
+        }
+        
+        // 更新 UI 状态
+        _uiState.value = _uiState.value.copy(settingsState = newSettings)
+    }
+    
+    /**
+     * 设置震动开关
+     */
+    fun setVibrationEnabled(enabled: Boolean) {
+        vibrationController?.setEnabled(enabled)
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(vibrationEnabled = enabled)
+        )
+    }
+    
+    /**
+     * 设置震动模式
+     */
+    fun setVibrationMode(mode: Int) {
+        vibrationController?.setMode(mode)
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(vibrationMode = mode)
+        )
+    }
+    
+    /**
+     * 设置音频开关
+     */
+    fun setAudioEnabled(enabled: Boolean) {
+        audioPlayer?.setEnabled(enabled)
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(audioEnabled = enabled)
+        )
+    }
+    
+    /**
+     * 设置音量
+     */
+    fun setAudioVolume(volume: Int) {
+        audioPlayer?.setVolume(volume)
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(audioVolume = volume)
+        )
+    }
+    
+    /**
+     * 设置疲劳音频 Uri
+     */
+    fun setTiredAudioUri(uri: String?) {
+        uri?.let { audioPlayer?.setTiredAudioUri(Uri.parse(it)) }
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(tiredAudioUri = uri)
+        )
+    }
+    
+    /**
+     * 设置轻度疲劳音频 Uri
+     */
+    fun setSlightlyTiredAudioUri(uri: String?) {
+        uri?.let { audioPlayer?.setSlightlyTiredAudioUri(Uri.parse(it)) }
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(slightlyTiredAudioUri = uri)
+        )
+    }
+    
+    /**
+     * 设置滑动窗时长
+     */
+    fun setWindowDuration(durationMs: Long) {
+        slidingWindowAnalyzer = SlidingWindowAnalyzer(durationMs)
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(windowDurationMs = durationMs)
+        )
+    }
+    
+    /**
+     * 切换检测模式
+     */
+    fun setSlidingWindowMode(enabled: Boolean) {
+        if (!enabled) {
+            slidingWindowAnalyzer.clear()
+        }
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(isSlidingWindowMode = enabled),
+            windowFrameCount = if (enabled) _uiState.value.windowFrameCount else 0
+        )
+    }
+    
+    /**
+     * 获取当前设置状态
+     */
+    fun getSettingsState(): SettingsState = _uiState.value.settingsState
+    
+    /**
+     * 清理资源
+     */
+    override fun onCleared() {
+        super.onCleared()
+        audioPlayer?.destroy()
+        vibrationController?.cancel()
+    }
 }

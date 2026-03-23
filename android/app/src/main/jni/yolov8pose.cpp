@@ -81,8 +81,12 @@ DetectionResult YOLOv8Pose::detect(const cv::Mat& image, float confThreshold, fl
     
     if (!net_) return result;
     
+    LOGI("Input image: %dx%d", image.cols, image.rows);
+    
     float scale, padX, padY;
     cv::Mat input = preprocess(image, scale, padX, padY);
+    
+    LOGI("Preprocess: scale=%.4f, padX=%.1f, padY=%.1f", scale, padX, padY);
     
     // Convert to ncnn Mat
     ncnn::Mat in = ncnn::Mat::from_pixels(input.data, ncnn::Mat::PIXEL_RGB2BGR, 
@@ -121,11 +125,10 @@ void YOLOv8Pose::postprocess(const void* output, int outputSize, float scale, fl
     int numBoxes = out.w;     // 8400
     const float* data = (const float*)out.data;
     
-    // Debug: print output shape
-    LOG_DEBUG("Output shape: h=%d w=%d c=%d", out.h, out.w, out.c);
+    // Debug: print output shape and first few values
+    LOGI("Output shape: h=%d w=%d c=%d", out.h, out.w, out.c);
     
-    // Debug: print feature ranges to understand output format (only in debug builds)
-#ifdef DEBUG
+    // Print feature ranges for debugging
     float minVals[10], maxVals[10];
     for (int f = 0; f < 10 && f < numFeatures; f++) {
         minVals[f] = 1e9f;
@@ -136,38 +139,10 @@ void YOLOv8Pose::postprocess(const void* output, int outputSize, float scale, fl
             if (v > maxVals[f]) maxVals[f] = v;
         }
     }
-    LOG_DEBUG("Feature ranges (0-9):");
-    LOG_DEBUG("  feat0: [%.1f, %.1f]", minVals[0], maxVals[0]);
-    LOG_DEBUG("  feat1: [%.1f, %.1f]", minVals[1], maxVals[1]);
-    LOG_DEBUG("  feat2: [%.1f, %.1f]", minVals[2], maxVals[2]);
-    LOG_DEBUG("  feat3: [%.1f, %.1f]", minVals[3], maxVals[3]);
-    LOG_DEBUG("  feat4 (conf): [%.3f, %.3f]", minVals[4], maxVals[4]);
-    LOG_DEBUG("  feat5 (kp0_x): [%.1f, %.1f]", minVals[5], maxVals[5]);
-    LOG_DEBUG("  feat6 (kp0_y): [%.1f, %.1f]", minVals[6], maxVals[6]);
-    LOG_DEBUG("  feat7 (kp0_c): [%.3f, %.3f]", minVals[7], maxVals[7]);
-#endif
-    
-    // Find top 5 confidences for debugging (no sigmoid needed, ONNX output already 0-1)
-#ifdef DEBUG
-    float topConfs[5] = {0};
-    int topIdxs[5] = {-1};
-    for (int i = 0; i < numBoxes; i++) {
-        float conf = data[4 * numBoxes + i];  // Already in 0-1 range
-        for (int j = 0; j < 5; j++) {
-            if (conf > topConfs[j]) {
-                for (int k = 4; k > j; k--) {
-                    topConfs[k] = topConfs[k-1];
-                    topIdxs[k] = topIdxs[k-1];
-                }
-                topConfs[j] = conf;
-                topIdxs[j] = i;
-                break;
-            }
-        }
-    }
-    LOG_DEBUG("Top 5 confs: %.3f %.3f %.3f %.3f %.3f",
-             topConfs[0], topConfs[1], topConfs[2], topConfs[3], topConfs[4]);
-#endif
+    LOGI("Feature ranges: cx[%.0f,%.0f] cy[%.0f,%.0f] w[%.0f,%.0f] h[%.0f,%.0f] conf[%.2f,%.2f]",
+         minVals[0], maxVals[0], minVals[1], maxVals[1], 
+         minVals[2], maxVals[2], minVals[3], maxVals[3],
+         minVals[4], maxVals[4]);
     
     // Find best detection (no sigmoid needed)
     float bestConf = 0.f;
@@ -226,10 +201,10 @@ void YOLOv8Pose::postprocess(const void* output, int outputSize, float scale, fl
         result.keypoints[k].y = (ky - padY) / scale;
         result.keypoints[k].confidence = kc;
         
-        // Debug: print first few keypoints
-        if (k < 3) {
-            LOG_DEBUG("KP%d raw: (%.1f, %.1f) -> mapped: (%.1f, %.1f) conf=%.2f", 
-                     k, kx, ky, result.keypoints[k].x, result.keypoints[k].y, kc);
+        // Debug: print keypoint values
+        if (k < 6) {  // Only print first 6 keypoints
+            LOGI("KP%d: raw(%.1f, %.1f) -> mapped(%.1f, %.1f) conf=%.2f", 
+                 k, kx, ky, result.keypoints[k].x, result.keypoints[k].y, kc);
         }
     }
 }

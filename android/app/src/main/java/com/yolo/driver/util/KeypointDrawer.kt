@@ -2,14 +2,21 @@ package com.yolo.driver.util
 
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
+import android.util.Log
+import androidx.camera.core.ImageProxy
 import com.yolo.driver.analyzer.KeypointDetector
 
 /**
  * 关键点绘制工具类
- * 统一处理 YOLOv8-Pose 17 关键点的坐标转换和绘制
+ * 简化版：直接按比例映射坐标
+ * YOLO 输入尺寸 640x640，直接映射到 PreviewView 尺寸
  */
 object KeypointDrawer {
+    
+    private const val TAG = "KeypointDrawer"
+    private const val YOLO_INPUT_SIZE = 640
     
     // 骨骼连接关系 (YOLOv8-Pose 17点)
     private val CONNECTIONS = listOf(
@@ -39,49 +46,99 @@ object KeypointDrawer {
     }
     
     /**
-     * 绘制关键点和骨骼连线
+     * 简化版关键点绘制
+     * 直接按比例映射：YOLO 坐标 -> PreviewView 坐标
      * 
      * @param canvas 画布
-     * @param keypoints 关键点列表
-     * @param frameWidth 原始帧宽度
-     * @param frameHeight 原始帧高度
-     * @param rotationDegrees 旋转角度 (0, 90, 180, 270)
-     * @param viewWidth 视图宽度
-     * @param viewHeight 视图高度
-     * @param pointPaint 点绘制配置 (可选)
-     * @param linePaint 线绘制配置 (可选)
-     * @param manualRotation 手动旋转覆盖 (调试用，默认 -1 表示不覆盖)
+     * @param keypoints 关键点列表（坐标已在原图尺寸范围）
+     * @param imageProxy 图像代理（用于获取尺寸信息）
+     * @param viewWidth PreviewView 宽度
+     * @param viewHeight PreviewView 高度
+     * @param pointPaint 点绘制配置
+     * @param linePaint 线绘制配置
+     * @param manualRotation 手动旋转角度 (0/90/180/270)
+     * @param mirror 是否镜像（前置摄像头）
      */
+    @androidx.camera.core.ExperimentalGetImage
     fun drawKeypoints(
         canvas: Canvas,
         keypoints: List<KeypointDetector.KeyPoint>,
-        frameWidth: Int,
-        frameHeight: Int,
-        rotationDegrees: Int,
+        imageProxy: ImageProxy,
         viewWidth: Int,
         viewHeight: Int,
         pointPaint: Paint = DEFAULT_POINT_PAINT,
         linePaint: Paint = DEFAULT_LINE_PAINT,
-        manualRotation: Int = -1
+        manualRotation: Int = 0,
+        mirror: Boolean = true
     ) {
         if (keypoints.isEmpty()) return
         
-        // 使用手动旋转覆盖（调试模式）
-        val effectiveRotation = if (manualRotation >= 0) manualRotation else rotationDegrees
+        // 获取图像尺寸
+        val imageWidth = imageProxy.width
+        val imageHeight = imageProxy.height
         
-        // 根据旋转角度计算坐标转换
-        val isPortrait = effectiveRotation == 270 || effectiveRotation == 90
+        Log.d(TAG, "drawKeypoints: image=${imageWidth}x${imageHeight}, view=${viewWidth}x${viewHeight}, rotation=$manualRotation, mirror=$mirror")
         
-        val (scaleX, scaleY) = if (isPortrait) {
-            viewWidth.toFloat() / frameHeight to viewHeight.toFloat() / frameWidth
-        } else {
-            viewWidth.toFloat() / frameWidth to viewHeight.toFloat() / frameHeight
-        }
+        // 根据旋转角度确定显示尺寸
+        // rotation 0/180: 显示尺寸 = 图像尺寸
+        // rotation 90/270: 显示尺寸 = 图像尺寸交换 (width <-> height)
+        val displayWidth = if (manualRotation == 90 || manualRotation == 270) imageHeight else imageWidth
+        val displayHeight = if (manualRotation == 90 || manualRotation == 270) imageWidth else imageHeight
         
-        // 转换所有有效关键点坐标
-        val transformedPoints = keypoints.map { kp ->
+        // 计算缩放比例（保持宽高比）
+        val scaleX = viewWidth.toFloat() / displayWidth
+        val scaleY = viewHeight.toFloat() / displayHeight
+        val scale = minOf(scaleX, scaleY)
+        
+        // 计算偏移（居中）
+        val scaledWidth = displayWidth * scale
+        val scaledHeight = displayHeight * scale
+        val offsetX = (viewWidth - scaledWidth) / 2f
+        val offsetY = (viewHeight - scaledHeight) / 2f
+        
+        Log.d(TAG, "display=${displayWidth}x${displayHeight}, scale=$scale, offset=($offsetX, $offsetY)")
+        
+        // 转换坐标
+        val transformedPoints = keypoints.mapIndexed { index, kp ->
             if (kp.confidence > 0.5f) {
-                transformPoint(kp, frameWidth, frameHeight, effectiveRotation, scaleX, scaleY, viewWidth)
+                // 1. 先根据旋转角度转换坐标
+                var x: Float
+                var y: Float
+                
+                when (manualRotation) {
+                    90 -> {
+                        // 顺时针90度: (x, y) -> (height - y, x)
+                        x = imageHeight - kp.y
+                        y = kp.x
+                    }
+                    180 -> {
+                        // 180度: (x, y) -> (width - x, height - y)
+                        x = imageWidth - kp.x
+                        y = imageHeight - kp.y
+                    }
+                    270 -> {
+                        // 顺时针270度(逆时针90度): (x, y) -> (y, width - x)
+                        x = kp.y
+                        y = imageWidth - kp.x
+                    }
+                    else -> {
+                        // 0度: 不变
+                        x = kp.x
+                        y = kp.y
+                    }
+                }
+                
+                // 2. 镜像（前置摄像头）
+                if (mirror) {
+                    x = displayWidth - x
+                }
+                
+                // 3. 缩放和偏移
+                x = x * scale + offsetX
+                y = y * scale + offsetY
+                
+                Log.d(TAG, "KP$index: (${kp.x}, ${kp.y}) --rot$manualRotation--> ($x, $y)")
+                Pair(x, y)
             } else {
                 null
             }
@@ -107,45 +164,23 @@ object KeypointDrawer {
     }
     
     /**
-     * 单点坐标转换
+     * 兼容旧接口
      */
-    private fun transformPoint(
-        kp: KeypointDetector.KeyPoint,
-        frameWidth: Int,
-        frameHeight: Int,
-        rotationDegrees: Int,
-        scaleX: Float,
-        scaleY: Float,
-        viewWidth: Int
-    ): Pair<Float, Float> {
-        var x = kp.x
-        var y = kp.y
-        
-        // 根据旋转角度调整坐标
-        when (rotationDegrees) {
-            90 -> {
-                val tmp = x
-                x = frameHeight - y
-                y = tmp
-            }
-            180 -> {
-                x = frameWidth - x
-                y = frameHeight - y
-            }
-            270 -> {
-                val tmp = x
-                x = y
-                y = frameWidth - tmp
-            }
-        }
-        
-        // 缩放到视图大小
-        var screenX = x * scaleX
-        val screenY = y * scaleY
-        
-        // 前置摄像头镜像
-        screenX = viewWidth - screenX
-        
-        return screenX to screenY
+    @androidx.camera.core.ExperimentalGetImage
+    fun drawKeypointsWithTransform(
+        canvas: Canvas,
+        keypoints: List<KeypointDetector.KeyPoint>,
+        imageProxy: ImageProxy,
+        previewView: androidx.camera.view.PreviewView,
+        pointPaint: Paint = DEFAULT_POINT_PAINT,
+        linePaint: Paint = DEFAULT_LINE_PAINT,
+        manualRotation: Int = 0,
+        mirror: Boolean = true
+    ) {
+        drawKeypoints(
+            canvas, keypoints, imageProxy,
+            previewView.width, previewView.height,
+            pointPaint, linePaint, manualRotation, mirror
+        )
     }
 }
