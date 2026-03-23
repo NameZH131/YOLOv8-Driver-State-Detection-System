@@ -48,8 +48,8 @@ fun KeypointOverlay(
         val effectiveFrameWidth = if (isRotated) frameHeight else frameWidth
         val effectiveFrameHeight = if (isRotated) frameWidth else frameHeight
         
-        // 计算缩放以保持宽高比
-        val scale = minOf(
+        // FILL_CENTER: 取最大缩放比填充屏幕（与 PreviewView 一致）
+        val scale = maxOf(
             viewWidth / effectiveFrameWidth,
             viewHeight / effectiveFrameHeight
         )
@@ -57,7 +57,7 @@ fun KeypointOverlay(
         val scaledWidth = effectiveFrameWidth * scale
         val scaledHeight = effectiveFrameHeight * scale
         
-        // 居中偏移
+        // 居中偏移（FILL_CENTER 模式下可能是负值，表示裁剪区域）
         val offsetX = (viewWidth - scaledWidth) / 2
         val offsetY = (viewHeight - scaledHeight) / 2
         
