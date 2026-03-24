@@ -65,13 +65,15 @@ class MainViewModel : ViewModel() {
         val slidingPoseMapping: PoseStateMapping = PoseStateMapping(),
         // 关键点置信度阈值
         val drawThreshold: Float = 0.5f,            // 绘制阈值 (0.3-0.8)
-        val analysisThreshold: Float = 0.5f         // 分析阈值 (0.3-0.8)
+        val analysisThreshold: Float = 0.5f,        // 分析阈值 (0.3-0.8)
+        // 提醒重复模式: 0=只播放一次, 1=持续播放（默认）
+        val alertRepeatMode: Int = 1
     )
     
     // UI 状态
     data class UiState(
         val driverState: DriverState = DriverState.Normal,
-        val headPoses: List<String> = emptyList(),
+        val headPoses: Set<StateAnalyzer.HeadPose> = emptySet(),
         val frameCount: Int = 0,
         val isCalibrated: Boolean = false,
         val manualRotation: Int = 0,
@@ -178,15 +180,10 @@ class MainViewModel : ViewModel() {
                 }
             }
             
-            // 转换头部姿态 (需要 Context，由 Activity 处理国际化)
-            val headPoses = a.headPoses.map { pose ->
-                pose.name  // 使用枚举名称，Activity 会转换
-            }
-            
-            // 更新 UI 状态
+            // 更新 UI 状态（姿态直接传递枚举集合，由 Composable 处理国际化）
             _uiState.value = _uiState.value.copy(
                 driverState = driverState,
-                headPoses = headPoses,
+                headPoses = a.headPoses,
                 frameCount = a.frameCount,
                 detectionError = null,
                 noPersonCount = 0
@@ -224,9 +221,17 @@ class MainViewModel : ViewModel() {
     private fun triggerAlerts(newState: DriverState) {
         android.util.Log.d("MainViewModel", "triggerAlerts: newState=$newState, lastTriggeredState=$lastTriggeredState, vibrationEnabled=${vibrationController?.isEnabled()}")
         
-        // 避免重复触发相同状态
-        if (newState == lastTriggeredState && newState == DriverState.Normal) {
-            android.util.Log.d("MainViewModel", "Skip: same state and Normal")
+        // Normal 状态不打断播放（两种模式共用）
+        if (newState == DriverState.Normal) {
+            android.util.Log.d("MainViewModel", "Normal: do not interrupt playback")
+            lastTriggeredState = newState
+            return
+        }
+        
+        // 根据播放模式决定是否跳过相同状态
+        val alertRepeatMode = _uiState.value.settingsState.alertRepeatMode
+        if (alertRepeatMode == DriverApplication.ALERT_REPEAT_ONCE && newState == lastTriggeredState) {
+            android.util.Log.d("MainViewModel", "Skip: same state (ONCE mode)")
             return
         }
         
@@ -244,8 +249,7 @@ class MainViewModel : ViewModel() {
                 vibrationController?.vibrate()
             }
             is DriverState.Normal -> {
-                // 正常状态：不播放音频
-                android.util.Log.d("MainViewModel", "Normal: no alerts")
+                // 正常状态：不打断播放（已在上方提前返回）
             }
         }
         
@@ -359,6 +363,102 @@ class MainViewModel : ViewModel() {
     fun getCalibrationStatusColor(): Int = if (_uiState.value.isCalibrated) Color.GREEN else Color.YELLOW
     
     // ========== 设置相关方法 ==========
+    
+    /**
+     * 从 SharedPreferences 加载设置
+     */
+    fun loadSettingsFromPrefs(context: android.content.Context) {
+        val prefs = context.getSharedPreferences(DriverApplication.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        
+        // 加载语言设置
+        val languageMode = prefs.getInt(DriverApplication.KEY_LANGUAGE_MODE, 0)
+        
+        // 加载姿态映射设置
+        val frameMapping = DriverApplication.getFramePoseMapping(context)
+        val slidingMapping = DriverApplication.getSlidingPoseMapping(context)
+        
+        // 转换为 ViewModel 的姿态映射
+        val framePoseMapping = PoseStateMapping(
+            headUpDown = intToDriverState(frameMapping.headUpDown),
+            headLeftRight = intToDriverState(frameMapping.headLeftRight),
+            postureDeviation = intToDriverState(frameMapping.postureDeviation)
+        )
+        
+        val slidingPoseMapping = PoseStateMapping(
+            headUpDown = intToDriverState(slidingMapping.headUpDown),
+            headLeftRight = intToDriverState(slidingMapping.headLeftRight),
+            postureDeviation = intToDriverState(slidingMapping.postureDeviation)
+        )
+        
+        // 加载所有设置
+        val allSettings = DriverApplication.loadAllSettings(context)
+        
+        // 更新 UI 状态
+        _uiState.value = _uiState.value.copy(
+            settingsState = _uiState.value.settingsState.copy(
+                languageMode = languageMode,
+                framePoseMapping = framePoseMapping,
+                slidingPoseMapping = slidingPoseMapping,
+                vibrationEnabled = allSettings.vibrationEnabled,
+                vibrationMode = allSettings.vibrationMode,
+                audioEnabled = allSettings.audioEnabled,
+                audioVolume = allSettings.audioVolume,
+                tiredAudioUri = allSettings.tiredAudioUri,
+                slightlyTiredAudioUri = allSettings.slightlyTiredAudioUri,
+                windowDurationMs = allSettings.windowDurationMs,
+                isSlidingWindowMode = allSettings.isSlidingWindowMode,
+                drawThreshold = allSettings.drawThreshold,
+                analysisThreshold = allSettings.analysisThreshold,
+                alertRepeatMode = allSettings.alertRepeatMode
+            )
+        )
+        
+        // 应用姿态映射到 StateAnalyzer
+        analyzer?.setAllPoseMappings(
+            StateAnalyzer.PoseStateMapping(
+                headUpDown = convertDriverState(framePoseMapping.headUpDown),
+                headLeftRight = convertDriverState(framePoseMapping.headLeftRight),
+                postureDeviation = convertDriverState(framePoseMapping.postureDeviation)
+            ),
+            StateAnalyzer.PoseStateMapping(
+                headUpDown = convertDriverState(slidingPoseMapping.headUpDown),
+                headLeftRight = convertDriverState(slidingPoseMapping.headLeftRight),
+                postureDeviation = convertDriverState(slidingPoseMapping.postureDeviation)
+            )
+        )
+        
+        // 应用其他设置到控制器
+        vibrationController?.setEnabled(allSettings.vibrationEnabled)
+        vibrationController?.setMode(allSettings.vibrationMode)
+        audioPlayer?.setEnabled(allSettings.audioEnabled)
+        audioPlayer?.setVolume(allSettings.audioVolume)
+        
+        // 应用自定义音频 URI (安全解析)
+        allSettings.tiredAudioUri?.takeIf { it.isNotEmpty() }?.let { uri ->
+            safeParseUri(uri)?.let { parsedUri -> audioPlayer?.setTiredAudioUri(parsedUri) }
+        }
+        allSettings.slightlyTiredAudioUri?.takeIf { it.isNotEmpty() }?.let { uri ->
+            safeParseUri(uri)?.let { parsedUri -> audioPlayer?.setSlightlyTiredAudioUri(parsedUri) }
+        }
+    }
+    
+    /**
+     * 整数转 DriverState
+     */
+    private fun intToDriverState(value: Int): DriverState = when (value) {
+        DriverApplication.STATE_NORMAL -> DriverState.Normal
+        DriverApplication.STATE_SLIGHTLY_TIRED -> DriverState.SlightlyTired
+        else -> DriverState.Tired
+    }
+    
+    /**
+     * DriverState 转整数
+     */
+    private fun driverStateToInt(state: DriverState): Int = when (state) {
+        is DriverState.Normal -> DriverApplication.STATE_NORMAL
+        is DriverState.SlightlyTired -> DriverApplication.STATE_SLIGHTLY_TIRED
+        is DriverState.Tired -> DriverApplication.STATE_TIRED
+    }
     
     /**
      * 更新设置状态

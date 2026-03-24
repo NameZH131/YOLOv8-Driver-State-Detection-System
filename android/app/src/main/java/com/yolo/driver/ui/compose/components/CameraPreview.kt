@@ -1,6 +1,6 @@
 package com.yolo.driver.ui.compose.components
 
-import android.view.View
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -15,18 +15,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import java.util.concurrent.Executors
 
 /**
  * 相机预览 Composable
  * 使用 CameraX 和 AndroidView 包装 PreviewView
+ * 支持动态切换前后摄像头
  */
 @Composable
 fun CameraPreview(
     modifier: Modifier = Modifier,
+    useFrontCamera: Boolean = true,
     onFrameAnalysis: (ImageProxy) -> Unit,
-    cameraSelector: CameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+    onCameraControlReady: ((androidx.camera.core.CameraControl) -> Unit)? = null,
+    onCameraReady: ((Camera) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -36,8 +38,14 @@ fun CameraPreview(
     } }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     
-    // 相机初始化
-    LaunchedEffect(Unit) {
+    // 根据 useFrontCamera 构建 CameraSelector
+    val cameraSelector = remember(useFrontCamera) {
+        if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA
+        else CameraSelector.DEFAULT_BACK_CAMERA
+    }
+    
+    // 相机初始化 - 监听 useFrontCamera 变化重新绑定
+    LaunchedEffect(cameraSelector) {
         val cameraProvider = ProcessCameraProvider.getInstance(context).get()
         
         val preview = Preview.Builder()
@@ -56,14 +64,17 @@ fun CameraPreview(
             }
         
         try {
-            // 解绑所有用例后再绑定
             cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
+            val camera = cameraProvider.bindToLifecycle(
                 lifecycleOwner,
                 cameraSelector,
                 preview,
                 imageAnalysis
             )
+            
+            // 回调 Camera 和 CameraControl
+            onCameraControlReady?.invoke(camera.cameraControl)
+            onCameraReady?.invoke(camera)
         } catch (e: Exception) {
             e.printStackTrace()
         }

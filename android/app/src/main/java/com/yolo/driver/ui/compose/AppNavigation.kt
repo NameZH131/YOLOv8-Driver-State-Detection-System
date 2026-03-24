@@ -40,6 +40,10 @@ fun AppNavigation(
             CalibrationScreen(
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onCalibrationComplete = {
+                    // 返回主界面并刷新校准状态
+                    navController.popBackStack()
                 }
             )
         }

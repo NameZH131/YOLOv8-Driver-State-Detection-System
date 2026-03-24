@@ -11,8 +11,16 @@
     <string name="state_tired">Tired</string>
     <string name="driver_state">Driver State</string>
     
-    <!-- Head Poses -->
-    <string name="head_pose">Head Pose</string>
+    <!-- Poses -->
+    <string name="pose">Pose</string>
+    <string name="pose_facing_forward">Facing Forward</string>
+    <string name="pose_head_up">Head Up</string>
+    <string name="pose_head_down">Head Down</string>
+    <string name="pose_head_offset">Head Offset</string>
+    <string name="pose_head_turned">Head Turned</string>
+    <string name="pose_posture_deviation">Posture Deviation</string>
+    <!-- Legacy keys for backward compatibility -->
+    <string name="head_pose">Pose</string>
     <string name="head_pose_facing_forward">Facing Forward</string>
     <string name="head_pose_head_up">Head Up</string>
     <string name="head_pose_head_down">Head Down</string>
@@ -37,6 +45,9 @@
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
     <string name="close">Close</string>
+    <string name="zoom_in">Zoom In</string>
+    <string name="zoom_out">Zoom Out</string>
+    <string name="switch_camera">Switch Camera</string>
     
     <!-- Settings -->
     <string name="settings">Settings</string>
@@ -71,6 +82,15 @@
     <string name="sliding_window_mode">Sliding Window</string>
     <string name="settings_saved">Settings saved</string>
     <string name="settings_saved_restart">Settings saved, restarting…</string>
+    
+    <!-- Alert Repeat Mode -->
+    <string name="alert_repeat_mode">Alert Repeat Mode</string>
+    <string name="alert_repeat_once">Play once on state change</string>
+    <string name="alert_repeat_continuous">Continuous playback</string>
+    <string name="confirm_once_title">Confirm Selection</string>
+    <string name="confirm_once_message">Playing once only will not interrupt playback when state returns to normal. Continue?</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
     
     <!-- Permissions -->
     <string name="camera_permission_title">Camera Permission Required</string>
@@ -111,8 +131,9 @@
     <string name="pose_to_state">Detect pose → Result state</string>
     <string name="confirm_normal_title">Confirm Setting</string>
     <string name="confirm_normal_message">Are you sure you want to set this pose as \"Normal\"? This means the pose will not trigger any fatigue alert.</string>
-    <string name="yes">Yes</string>
-    <string name="no">No</string>
+    <string name="mirror">Mirror</string>
+    <string name="normal">Normal</string>
+    <string name="mirror_keypoints">Mirror Keypoints</string>
     
     <!-- Keypoint Confidence Thresholds -->
     <string name="keypoint_settings">Keypoint Settings</string>

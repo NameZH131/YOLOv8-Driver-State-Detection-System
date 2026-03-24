@@ -51,6 +51,7 @@ import com.yolo.driver.ui.compose.theme.DriverMonitorTheme
 import com.yolo.driver.ui.viewmodel.CalibrationViewModel
 import com.yolo.driver.util.CameraUtils
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * @writer: zhangheng
@@ -59,7 +60,8 @@ import java.io.File
 @Composable
 fun CalibrationScreen(
     viewModel: CalibrationViewModel = viewModel(factory = CalibrationViewModel.Factory(LocalContext.current)),
-    onNavigateBack: () -> Unit = {}
+    onNavigateBack: () -> Unit = {},
+    onCalibrationComplete: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
@@ -85,8 +87,8 @@ fun CalibrationScreen(
     // 检测器生命周期管理
     var detector by remember { mutableStateOf<KeypointDetector?>(null) }
     
-    // NV21 缓冲区复用
-    var nv21Buffer by remember { mutableStateOf<ByteArray?>(null) }
+    // NV21 缓冲区复用 (线程安全)
+    val nv21BufferRef = remember { AtomicReference<ByteArray?>(null) }
     
     // 初始化
     DisposableEffect(Unit) {
@@ -105,7 +107,13 @@ fun CalibrationScreen(
             Toast.makeText(context, "检测器初始化失败", Toast.LENGTH_LONG).show()
         }
         
+        // 设置校准完成回调
+        viewModel.onCalibrationComplete = {
+            onCalibrationComplete()
+        }
+        
         onDispose {
+            viewModel.onCalibrationComplete = null
             KeypointDetector.releaseInstance()
             detector = null
         }
@@ -115,8 +123,9 @@ fun CalibrationScreen(
     val onFrameAnalysis: (ImageProxy) -> Unit = { imageProxy ->
         detector?.let { det ->
             if (det.isInitialized()) {
-                val nv21 = CameraUtils.imageProxyToNV21(imageProxy, nv21Buffer)
-                nv21Buffer = nv21
+                val reuseBuffer = nv21BufferRef.get()
+                val nv21 = CameraUtils.imageProxyToNV21(imageProxy, reuseBuffer)
+                nv21BufferRef.set(nv21)
                 
                 val result = det.detectWithResult(
                     nv21,
@@ -271,8 +280,9 @@ fun CalibrationScreen(
                                 viewModel.startCalibration()
                             }
                             CalibrationViewModel.CalibrationPhase.COMPLETED -> {
+                                // 校准已完成，用户确认保存
                                 viewModel.reset()
-                                onNavigateBack()
+                                onCalibrationComplete()
                             }
                             else -> {
                                 viewModel.skipCurrentAction()

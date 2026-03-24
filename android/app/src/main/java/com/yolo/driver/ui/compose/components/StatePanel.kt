@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.yolo.driver.MainViewModel
 import com.yolo.driver.R
+import com.yolo.driver.analyzer.StateAnalyzer
 import com.yolo.driver.ui.compose.theme.Normal
 import com.yolo.driver.ui.compose.theme.SlightlyTired
 import com.yolo.driver.ui.compose.theme.Tired
@@ -30,7 +31,7 @@ import com.yolo.driver.ui.compose.theme.Tired
 @Composable
 fun StatePanel(
     driverState: MainViewModel.DriverState,
-    headPoses: List<String>,
+    headPoses: Set<StateAnalyzer.HeadPose>,
     frameCount: Int,
     isCalibrated: Boolean,
     manualRotation: Int,
@@ -72,10 +73,20 @@ fun StatePanel(
             )
         }
         
-        // 头部姿态
+        // 姿态（国际化显示）
         if (headPoses.isNotEmpty()) {
+            val localizedPoses = headPoses.map { pose ->
+                when (pose) {
+                    StateAnalyzer.HeadPose.FACING_FORWARD -> stringResource(R.string.pose_facing_forward)
+                    StateAnalyzer.HeadPose.HEAD_UP -> stringResource(R.string.pose_head_up)
+                    StateAnalyzer.HeadPose.HEAD_DOWN -> stringResource(R.string.pose_head_down)
+                    StateAnalyzer.HeadPose.HEAD_OFFSET -> stringResource(R.string.pose_head_offset)
+                    StateAnalyzer.HeadPose.HEAD_TURNED -> stringResource(R.string.pose_head_turned)
+                    StateAnalyzer.HeadPose.POSTURE_DEVIATION -> stringResource(R.string.pose_posture_deviation)
+                }
+            }
             Text(
-                text = "${stringResource(R.string.head_pose)}: ${headPoses.joinToString(", ")}",
+                text = "${stringResource(R.string.pose)}: ${localizedPoses.joinToString(", ")}",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.8f)
             )

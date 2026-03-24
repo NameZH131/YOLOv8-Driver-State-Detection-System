@@ -11,8 +11,16 @@
     <string name="state_tired">疲劳</string>
     <string name="driver_state">驾驶员状态</string>
     
-    <!-- Head Poses -->
-    <string name="head_pose">头部姿态</string>
+    <!-- Poses -->
+    <string name="pose">姿态</string>
+    <string name="pose_facing_forward">正视前方</string>
+    <string name="pose_head_up">抬头</string>
+    <string name="pose_head_down">低头</string>
+    <string name="pose_head_offset">头部偏移</string>
+    <string name="pose_head_turned">侧脸</string>
+    <string name="pose_posture_deviation">坐姿倾斜</string>
+    <!-- Legacy keys for backward compatibility -->
+    <string name="head_pose">姿态</string>
     <string name="head_pose_facing_forward">正视前方</string>
     <string name="head_pose_head_up">抬头</string>
     <string name="head_pose_head_down">低头</string>
@@ -37,6 +45,9 @@
     <string name="save">保存</string>
     <string name="cancel">取消</string>
     <string name="close">关闭</string>
+    <string name="zoom_in">放大</string>
+    <string name="zoom_out">缩小</string>
+    <string name="switch_camera">切换摄像头</string>
     
     <!-- Settings -->
     <string name="settings">设置</string>
@@ -71,6 +82,15 @@
     <string name="sliding_window_mode">滑动窗模式</string>
     <string name="settings_saved">设置已保存</string>
     <string name="settings_saved_restart">设置已保存，正在重启…</string>
+    
+    <!-- Alert Repeat Mode -->
+    <string name="alert_repeat_mode">提醒播放模式</string>
+    <string name="alert_repeat_once">状态变化时播放一次</string>
+    <string name="alert_repeat_continuous">持续播放</string>
+    <string name="confirm_once_title">确认选择</string>
+    <string name="confirm_once_message">选择"只播放一次"后，状态恢复正常时不会打断播放。确定要切换吗？</string>
+    <string name="yes">是</string>
+    <string name="no">否</string>
     
     <!-- Permissions -->
     <string name="camera_permission_title">需要相机权限</string>
@@ -111,8 +131,10 @@
     <string name="pose_to_state">检测到姿态 → 结果状态</string>
     <string name="confirm_normal_title">确认设置</string>
     <string name="confirm_normal_message">确定要将此姿态设置为"正常"吗？这意味着检测到该姿态时不会触发任何疲劳提醒。</string>
-    <string name="yes">是</string>
-    <string name="no">否</string>
+            
+            <!-- 镜像设置 -->    <string name="mirror">镜像</string>
+    <string name="normal">正常</string>
+    <string name="mirror_keypoints">镜像关键点</string>
     
     <!-- Keypoint Confidence Thresholds -->
     <string name="keypoint_settings">关键点设置</string>

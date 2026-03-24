@@ -1,11 +1,16 @@
 package com.yolo.driver.ui.compose
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraControl
+import androidx.camera.core.CameraInfo
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.ZoomState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -21,9 +26,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import java.util.concurrent.atomic.AtomicReference
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yolo.driver.DriverApplication
 import com.yolo.driver.MainViewModel
 import com.yolo.driver.R
 import com.yolo.driver.analyzer.CalibrationManager
@@ -79,11 +89,39 @@ fun MainScreen(
     var audioPlayer by remember { mutableStateOf<AudioPlayer?>(null) }
     var vibrationController by remember { mutableStateOf<VibrationController?>(null) }
     
-    // NV21 缓冲区复用
-    var nv21Buffer by remember { mutableStateOf<ByteArray?>(null) }
+    // NV21 缓冲区复用 (线程安全)
+    val nv21BufferRef = remember { AtomicReference<ByteArray?>(null) }
     
     // 设置对话框
     var showSettingsDialog by remember { mutableStateOf(false) }
+    
+    // CameraControl 用于缩放控制
+    var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
+    var zoomRatio by remember { mutableStateOf(1.0f) }
+    var minZoomRatio by remember { mutableStateOf(1.0f) }
+    var maxZoomRatio by remember { mutableStateOf(5.0f) }
+    
+    // 前后摄像头切换
+    var useFrontCamera by remember { mutableStateOf(true) }
+    
+    // 镜像关键点
+    var mirrorKeypoints by remember { mutableStateOf(true) }
+    
+    // 生命周期监听 - 用于从校准页面返回时刷新状态
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // 从校准页面返回时刷新校准状态和设置
+                viewModel.updateCalibrationStatus()
+                viewModel.loadSettingsFromPrefs(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     
     // 初始化
     LaunchedEffect(Unit) {
@@ -91,6 +129,9 @@ fun MainScreen(
         if (!hasCameraPermission) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
+        
+        // 加载保存的设置（包括语言设置）
+        viewModel.loadSettingsFromPrefs(context)
         
         // 初始化检测器
         detector = KeypointDetector.getInstance()
@@ -141,8 +182,9 @@ fun MainScreen(
     val onFrameAnalysis: (ImageProxy) -> Unit = { imageProxy ->
         detector?.let { det ->
             if (det.isInitialized()) {
-                val nv21 = CameraUtils.imageProxyToNV21(imageProxy, nv21Buffer)
-                nv21Buffer = nv21
+                val reuseBuffer = nv21BufferRef.get()
+                val nv21 = CameraUtils.imageProxyToNV21(imageProxy, reuseBuffer)
+                nv21BufferRef.set(nv21)
                 
                 val result = det.detectWithResult(
                     nv21,
@@ -179,7 +221,20 @@ fun MainScreen(
             if (hasCameraPermission) {
                 CameraPreview(
                     modifier = Modifier.fillMaxSize(),
-                    onFrameAnalysis = onFrameAnalysis
+                    useFrontCamera = useFrontCamera,
+                    onFrameAnalysis = onFrameAnalysis,
+                    onCameraControlReady = { control ->
+                        cameraControl = control
+                        // 切换摄像头后重置缩放
+                        zoomRatio = 1.0f
+                    },
+                    onCameraReady = { camera ->
+                        // 获取相机缩放范围
+                        camera.cameraInfo.zoomState.value?.let { zoomState ->
+                            minZoomRatio = zoomState.minZoomRatio
+                            maxZoomRatio = zoomState.maxZoomRatio
+                        }
+                    }
                 )
             }
             
@@ -190,6 +245,7 @@ fun MainScreen(
                 frameHeight = uiState.frameHeight,
                 rotation = 0,  // 系统旋转，由 CameraX 处理
                 manualRotation = uiState.manualRotation,
+                mirror = mirrorKeypoints,
                 modifier = Modifier.fillMaxSize()
             )
             
@@ -215,6 +271,36 @@ fun MainScreen(
                 onCalibrate = onNavigateToCalibration,
                 onReset = { viewModel.reset() },
                 onSettings = { showSettingsDialog = true },
+                zoomRatio = zoomRatio,
+                minZoomRatio = minZoomRatio,
+                onZoomIn = {
+                    cameraControl?.let { control ->
+                        val newZoom = (zoomRatio * 1.2f).coerceAtMost(maxZoomRatio)
+                        control.setZoomRatio(newZoom)
+                        zoomRatio = newZoom
+                    }
+                },
+                onZoomOut = {
+                    cameraControl?.let { control ->
+                        val newZoom = if (useFrontCamera && minZoomRatio >= 1.0f) {
+                            // 前置摄像头：尝试缩小到 0.5x
+                            (zoomRatio / 1.2f).coerceAtLeast(0.5f)
+                        } else {
+                            // 后置摄像头：正常缩小
+                            (zoomRatio / 1.2f).coerceAtLeast(minZoomRatio)
+                        }
+                        control.setZoomRatio(newZoom)
+                        zoomRatio = newZoom
+                    }
+                },
+                useFrontCamera = useFrontCamera,
+                onSwitchCamera = {
+                    useFrontCamera = !useFrontCamera
+                },
+                mirrorKeypoints = mirrorKeypoints,
+                onToggleMirror = {
+                    mirrorKeypoints = !mirrorKeypoints
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(16.dp)
@@ -226,8 +312,105 @@ fun MainScreen(
                     currentSettings = uiState.settingsState,
                     onDismiss = { showSettingsDialog = false },
                     onSave = { newSettings ->
+                        // 检查语言是否变化
+                        val languageChanged = newSettings.languageMode != uiState.settingsState.languageMode
+                        
+                        // 保存语言设置到 SharedPreferences
+                        if (languageChanged) {
+                            DriverApplication.saveLanguageMode(context, newSettings.languageMode)
+                        }
+                        
+                        // 保存姿态映射设置到 SharedPreferences
+                        val frameMappingChanged = newSettings.framePoseMapping != uiState.settingsState.framePoseMapping
+                        val slidingMappingChanged = newSettings.slidingPoseMapping != uiState.settingsState.slidingPoseMapping
+                        
+                        if (frameMappingChanged || slidingMappingChanged) {
+                            DriverApplication.savePoseMappings(
+                                context,
+                                DriverApplication.PoseMappingData(
+                                    headUpDown = driverStateToInt(newSettings.framePoseMapping.headUpDown),
+                                    headLeftRight = driverStateToInt(newSettings.framePoseMapping.headLeftRight),
+                                    postureDeviation = driverStateToInt(newSettings.framePoseMapping.postureDeviation)
+                                ),
+                                DriverApplication.PoseMappingData(
+                                    headUpDown = driverStateToInt(newSettings.slidingPoseMapping.headUpDown),
+                                    headLeftRight = driverStateToInt(newSettings.slidingPoseMapping.headLeftRight),
+                                    postureDeviation = driverStateToInt(newSettings.slidingPoseMapping.postureDeviation)
+                                )
+                            )
+                        }
+                        
+                        // 保存所有设置到 SharedPreferences（音频 URI、音量、震动等）
+                        DriverApplication.saveAllSettings(
+                            context = context,
+                            vibrationEnabled = newSettings.vibrationEnabled,
+                            vibrationMode = newSettings.vibrationMode,
+                            audioEnabled = newSettings.audioEnabled,
+                            audioVolume = newSettings.audioVolume,
+                            tiredAudioUri = newSettings.tiredAudioUri,
+                            slightlyTiredAudioUri = newSettings.slightlyTiredAudioUri,
+                            windowDurationMs = newSettings.windowDurationMs,
+                            isSlidingWindowMode = newSettings.isSlidingWindowMode,
+                            drawThreshold = newSettings.drawThreshold,
+                            analysisThreshold = newSettings.analysisThreshold,
+                            alertRepeatMode = newSettings.alertRepeatMode
+                        )
+                        
                         viewModel.updateSettings(newSettings)
                         showSettingsDialog = false
+                        
+                        // 语言变化后重启 Activity 使配置生效
+                        if (languageChanged) {
+                            (context as? android.app.Activity)?.recreate()
+                        }
+                    },
+                    onAutoSave = { newSettings ->
+                        // 检查语言是否变化
+                        val languageChanged = newSettings.languageMode != uiState.settingsState.languageMode
+                        
+                        // 保存语言设置到 SharedPreferences
+                        if (languageChanged) {
+                            DriverApplication.saveLanguageMode(context, newSettings.languageMode)
+                        }
+                        
+                        // 保存姿态映射设置到 SharedPreferences
+                        DriverApplication.savePoseMappings(
+                            context,
+                            DriverApplication.PoseMappingData(
+                                headUpDown = driverStateToInt(newSettings.framePoseMapping.headUpDown),
+                                headLeftRight = driverStateToInt(newSettings.framePoseMapping.headLeftRight),
+                                postureDeviation = driverStateToInt(newSettings.framePoseMapping.postureDeviation)
+                            ),
+                            DriverApplication.PoseMappingData(
+                                headUpDown = driverStateToInt(newSettings.slidingPoseMapping.headUpDown),
+                                headLeftRight = driverStateToInt(newSettings.slidingPoseMapping.headLeftRight),
+                                postureDeviation = driverStateToInt(newSettings.slidingPoseMapping.postureDeviation)
+                            )
+                        )
+                        
+                        // 保存所有设置到 SharedPreferences
+                        DriverApplication.saveAllSettings(
+                            context = context,
+                            vibrationEnabled = newSettings.vibrationEnabled,
+                            vibrationMode = newSettings.vibrationMode,
+                            audioEnabled = newSettings.audioEnabled,
+                            audioVolume = newSettings.audioVolume,
+                            tiredAudioUri = newSettings.tiredAudioUri,
+                            slightlyTiredAudioUri = newSettings.slightlyTiredAudioUri,
+                            windowDurationMs = newSettings.windowDurationMs,
+                            isSlidingWindowMode = newSettings.isSlidingWindowMode,
+                            drawThreshold = newSettings.drawThreshold,
+                            analysisThreshold = newSettings.analysisThreshold,
+                            alertRepeatMode = newSettings.alertRepeatMode
+                        )
+                        
+                        // 更新 ViewModel 状态（不关闭对话框）
+                        viewModel.updateSettings(newSettings)
+                        
+                        // 语言变化后重启 Activity 使配置生效
+                        if (languageChanged) {
+                            (context as? android.app.Activity)?.recreate()
+                        }
                     }
                 )
             }
@@ -257,4 +440,13 @@ private fun copyAssetsIfNeeded(context: android.content.Context) {
             }
         }
     }
+}
+
+/**
+ * DriverState 转整数（用于保存到 SharedPreferences）
+ */
+private fun driverStateToInt(state: MainViewModel.DriverState): Int = when (state) {
+    is MainViewModel.DriverState.Normal -> DriverApplication.STATE_NORMAL
+    is MainViewModel.DriverState.SlightlyTired -> DriverApplication.STATE_SLIGHTLY_TIRED
+    is MainViewModel.DriverState.Tired -> DriverApplication.STATE_TIRED
 }
