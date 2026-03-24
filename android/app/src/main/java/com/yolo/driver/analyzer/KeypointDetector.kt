@@ -134,6 +134,25 @@ class KeypointDetector private constructor() {
     
     @Volatile
     private var isInitialized = false
+    @Volatile
+    private var gpuEnabled = false  // 实际使用的 GPU 状态
+    
+    /**
+     * 检测 Vulkan GPU 是否可用
+     */
+    fun checkVulkanSupport(): Boolean {
+        return try {
+            nativeCheckVulkanSupport()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to check Vulkan support", e)
+            false
+        }
+    }
+    
+    /**
+     * 获取实际使用的 GPU 状态
+     */
+    fun isGPUEnabled(): Boolean = gpuEnabled
     
     /**
      * 初始化检测器
@@ -146,11 +165,13 @@ class KeypointDetector private constructor() {
         
         return try {
             isInitialized = nativeInit(paramPath, binPath, useGPU)
-            Log.i(TAG, "Detector init: $isInitialized")
+            gpuEnabled = if (isInitialized) nativeIsGPUEnabled() else false
+            Log.i(TAG, "Detector init: $isInitialized, GPU enabled: $gpuEnabled (requested: $useGPU)")
             isInitialized
         } catch (e: Exception) {
             Log.e(TAG, "Failed to init detector", e)
             isInitialized = false
+            gpuEnabled = false
             false
         }
     }
@@ -244,6 +265,8 @@ class KeypointDetector private constructor() {
     fun isInitialized(): Boolean = isInitialized
     
     // Native methods
+    private external fun nativeCheckVulkanSupport(): Boolean
+    private external fun nativeIsGPUEnabled(): Boolean
     private external fun nativeInit(paramPath: String, binPath: String, useGPU: Boolean): Boolean
     private external fun nativeDetect(
         imageData: ByteArray,

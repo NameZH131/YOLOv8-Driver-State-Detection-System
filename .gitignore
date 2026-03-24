@@ -51,5 +51,30 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+
+# ==================== Android ====================
+# Gradle
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/local.properties
+
+# SDK 压缩包（可外部下载）
+*.zip
+opencv-mobile*.zip
+
+# 签名密钥（安全考虑）
+*.jks
+*.keystore
+
+# ==================== 项目特定 ====================
+# 临时文件
+nul
+conversation-*.txt
+
+# 媒体资源（可选）
+asset/
+assets/

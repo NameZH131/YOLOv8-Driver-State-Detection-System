@@ -4,6 +4,8 @@
 #include <opencv2/imgproc.hpp>
 #include <mutex>
 #include <vector>
+#include <net.h>  // ncnn for Vulkan detection
+#include <gpu.h>  // ncnn GPU functions
 #include "yolov8pose.h"
 
 #define LOG_TAG "YOLOv8Pose"
@@ -13,6 +15,7 @@
 // Thread-safe detector management
 static std::mutex g_detector_mutex;
 static yolo::YOLOv8Pose* g_detector = nullptr;
+static bool g_gpu_enabled = false;  // 实际使用的 GPU 状态
 
 extern "C" {
 
@@ -37,11 +40,50 @@ Java_com_yolo_driver_analyzer_KeypointDetector_nativeInit(
     g_detector = new yolo::YOLOv8Pose();
     bool success = g_detector->init(param, bin, useGPU);
     
+    // 如果 GPU 初始化失败，尝试 CPU 降级
+    if (!success && useGPU) {
+        LOGI("GPU init failed, falling back to CPU");
+        success = g_detector->init(param, bin, false);
+        g_gpu_enabled = false;
+    } else {
+        g_gpu_enabled = success && useGPU;
+    }
+    
     env->ReleaseStringUTFChars(paramPath, param);
     env->ReleaseStringUTFChars(binPath, bin);
     
-    LOGI("YOLOv8-Pose init: %s, GPU: %s", success ? "success" : "failed", useGPU ? "yes" : "no");
+    LOGI("YOLOv8-Pose init: %s, GPU: %s (requested: %s)", 
+         success ? "success" : "failed", 
+         g_gpu_enabled ? "yes" : "no",
+         useGPU ? "yes" : "no");
     return success;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_yolo_driver_analyzer_KeypointDetector_nativeCheckVulkanSupport(
+        JNIEnv* env,
+        jobject thiz) {
+    // 检测 Vulkan 是否可用
+    // 通过创建一个临时 Net 来测试
+    ncnn::Net testNet;
+    testNet.opt.use_vulkan_compute = true;
+    
+    // 尝试获取 Vulkan 设备
+    bool hasVulkan = (ncnn::get_gpu_count() > 0);
+    
+    LOGI("Vulkan support check: %s (GPU count: %d)", 
+         hasVulkan ? "available" : "not available",
+         ncnn::get_gpu_count());
+    
+    return hasVulkan ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_yolo_driver_analyzer_KeypointDetector_nativeIsGPUEnabled(
+        JNIEnv* env,
+        jobject thiz) {
+    std::lock_guard<std::mutex> lock(g_detector_mutex);
+    return g_gpu_enabled ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jfloatArray JNICALL

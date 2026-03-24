@@ -36,14 +36,25 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("../release-key.jks")
-            storePassword = "yolo123456"
+            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String? ?: "yolo123456"
             keyAlias = "yolo-driver"
-            keyPassword = "yolo123456"
+            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String? ?: "yolo123456"
         }
     }
 
     buildTypes {
         release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig = signingConfigs.getByName("release")
+        }
+        // Release Dev 版本（applicationId 后缀 .dev）
+        create("releaseDev") {
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -2,6 +2,7 @@ package com.yolo.driver.util
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.camera.core.ImageProxy
 import androidx.core.content.ContextCompat
 import android.content.Context
@@ -12,37 +13,64 @@ import android.content.Context
  */
 object CameraUtils {
     
+    private const val TAG = "CameraUtils"
+    
     /**
      * 将 ImageProxy 转换为 NV21 格式字节数组
-     * 支持buffer复用以减少GC压力
+     * 正确处理 YUV 格式的 rowStride 和 pixelStride
+     * 分别处理 U 和 V planes 的内存布局
      * 
      * @param image CameraX ImageProxy
      * @param reuseBuffer 可复用的buffer（可为null）
-     * @return Pair<ByteArray, Boolean> 返回NV21数据和是否使用了新buffer
+     * @return NV21 字节数组
      */
     fun imageProxyToNV21(
         image: ImageProxy,
         reuseBuffer: ByteArray? = null
     ): ByteArray {
+        val width = image.width
+        val height = image.height
+        
         val yBuffer = image.planes[0].buffer
         val uBuffer = image.planes[1].buffer
         val vBuffer = image.planes[2].buffer
         
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
-        val totalSize = ySize + uSize + vSize
+        // 分别获取 Y, U, V planes 的参数
+        val yRowStride = image.planes[0].rowStride
+        val uRowStride = image.planes[1].rowStride
+        val uPixelStride = image.planes[1].pixelStride
+        val vRowStride = image.planes[2].rowStride
+        val vPixelStride = image.planes[2].pixelStride
         
-        // 复用或创建新buffer
-        val nv21 = if (reuseBuffer != null && reuseBuffer.size == totalSize) {
-            reuseBuffer
-        } else {
-            ByteArray(totalSize)
+        // 输出调试信息
+        Log.d(TAG, "Image size: ${width}x${height}, yRowStride=$yRowStride, " +
+                   "uRowStride=$uRowStride, uPixelStride=$uPixelStride, " +
+                   "vRowStride=$vRowStride, vPixelStride=$vPixelStride")
+        
+        // NV21 格式: Y (width * height) + UV (width * height / 2)
+        val nv21Size = width * height * 3 / 2
+        val nv21 = if (reuseBuffer != null && reuseBuffer.size == nv21Size) reuseBuffer else ByteArray(nv21Size)
+        
+        // Y plane: 逐行复制，处理 rowStride
+        var pos = 0
+        for (row in 0 until height) {
+            yBuffer.position(row * yRowStride)
+            yBuffer.get(nv21, pos, width)
+            pos += width
         }
         
-        yBuffer.get(nv21, 0, ySize)
-        vBuffer.get(nv21, ySize, vSize)
-        uBuffer.get(nv21, ySize + vSize, uSize)
+        // UV plane: NV21 格式是 V-U-V-U 交错
+        // 分别处理 U 和 V planes，不假设它们使用相同布局
+        for (row in 0 until height / 2) {
+            for (col in 0 until width / 2) {
+                // 分别计算 U 和 V 的索引
+                val vIndex = row * vRowStride + col * vPixelStride
+                val uIndex = row * uRowStride + col * uPixelStride
+                
+                nv21[pos++] = vBuffer.get(vIndex)  // V 先
+                nv21[pos++] = uBuffer.get(uIndex)  // U 后
+            }
+        }
         
         return nv21
     }

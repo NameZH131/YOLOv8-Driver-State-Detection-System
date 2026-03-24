@@ -64,6 +64,11 @@ fun MainScreen(
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     
+    // 单独订阅关键点相关状态（优化：减少 KeypointOverlay 更新时的重组范围）
+    val keypoints by viewModel.keypoints.collectAsState()
+    val frameSize by viewModel.frameSize.collectAsState()
+    val rotationDegrees by viewModel.rotationDegreesFlow.collectAsState()
+    
     // 权限状态
     var hasCameraPermission by remember { 
         mutableStateOf(
@@ -133,6 +138,10 @@ fun MainScreen(
         // 加载保存的设置（包括语言设置）
         viewModel.loadSettingsFromPrefs(context)
         
+        // 获取 GPU 设置
+        val allSettings = DriverApplication.loadAllSettings(context)
+        val useGPU = allSettings.gpuEnabled
+        
         // 初始化检测器
         detector = KeypointDetector.getInstance()
         
@@ -142,8 +151,11 @@ fun MainScreen(
         val paramPath = File(context.filesDir, "yolov8n_pose.ncnn.param").absolutePath
         val binPath = File(context.filesDir, "yolov8n_pose.ncnn.bin").absolutePath
         
-        if (detector?.init(paramPath, binPath, useGPU = true) != true) {
+        if (detector?.init(paramPath, binPath, useGPU) != true) {
             Toast.makeText(context, "检测器初始化失败", Toast.LENGTH_LONG).show()
+        } else if (!detector!!.isGPUEnabled() && useGPU) {
+            // GPU 初始化失败，已自动降级到 CPU
+            Toast.makeText(context, context.getString(R.string.gpu_fallback_to_cpu), Toast.LENGTH_LONG).show()
         }
         
         // 初始化分析器
@@ -192,13 +204,17 @@ fun MainScreen(
                     imageProxy.height
                 )
                 
+                // 获取相机旋转角度
+                val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                
                 when (result) {
                     is KeypointDetector.DetectResult.Success -> {
                         // 更新关键点状态
                         viewModel.updateKeypoints(
                             result.keypoints,
                             imageProxy.width,
-                            imageProxy.height
+                            imageProxy.height,
+                            rotationDegrees
                         )
                         
                         // 进行疲劳分析
@@ -238,15 +254,16 @@ fun MainScreen(
                 )
             }
             
-            // 关键点覆盖层
+            // 关键点覆盖层（使用单独订阅的状态，减少重组范围）
             KeypointOverlay(
-                keypoints = uiState.keypoints,
-                frameWidth = uiState.frameWidth,
-                frameHeight = uiState.frameHeight,
+                keypoints = keypoints,
+                frameWidth = frameSize.first,
+                frameHeight = frameSize.second,
                 rotation = 0,  // 系统旋转，由 CameraX 处理
                 manualRotation = uiState.manualRotation,
                 mirror = mirrorKeypoints,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                rotationDegrees = rotationDegrees
             )
             
             // 状态信息面板

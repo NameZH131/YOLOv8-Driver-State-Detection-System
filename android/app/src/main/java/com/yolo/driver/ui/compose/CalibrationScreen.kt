@@ -43,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yolo.driver.DriverApplication
 import com.yolo.driver.R
 import com.yolo.driver.analyzer.KeypointDetector
 import com.yolo.driver.ui.compose.components.CameraPreview
@@ -97,14 +98,21 @@ fun CalibrationScreen(
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
         
+        // 获取 GPU 设置
+        val allSettings = DriverApplication.loadAllSettings(context)
+        val useGPU = allSettings.gpuEnabled
+        
         // 初始化检测器
         detector = KeypointDetector.getInstance()
         
         val paramPath = File(context.filesDir, "yolov8n_pose.ncnn.param").absolutePath
         val binPath = File(context.filesDir, "yolov8n_pose.ncnn.bin").absolutePath
         
-        if (detector?.init(paramPath, binPath, useGPU = true) != true) {
+        if (detector?.init(paramPath, binPath, useGPU) != true) {
             Toast.makeText(context, "检测器初始化失败", Toast.LENGTH_LONG).show()
+        } else if (!detector!!.isGPUEnabled() && useGPU) {
+            // GPU 初始化失败，已自动降级到 CPU
+            Toast.makeText(context, context.getString(R.string.gpu_fallback_to_cpu), Toast.LENGTH_LONG).show()
         }
         
         // 设置校准完成回调

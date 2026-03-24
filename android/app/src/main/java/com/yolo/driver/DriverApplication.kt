@@ -36,6 +36,7 @@ class DriverApplication : Application() {
         const val KEY_DRAW_THRESHOLD = "draw_threshold"
         const val KEY_ANALYSIS_THRESHOLD = "analysis_threshold"
         const val KEY_ALERT_REPEAT_MODE = "alert_repeat_mode"
+        const val KEY_GPU_ENABLED = "gpu_enabled"  // GPU 加速开关
         
         // 姿态状态值
         const val STATE_NORMAL = 0
@@ -126,7 +127,8 @@ class DriverApplication : Application() {
             isSlidingWindowMode: Boolean,
             drawThreshold: Float,
             analysisThreshold: Float,
-            alertRepeatMode: Int = ALERT_REPEAT_ONCE
+            alertRepeatMode: Int = ALERT_REPEAT_ONCE,
+            gpuEnabled: Boolean = true
         ) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
@@ -141,6 +143,7 @@ class DriverApplication : Application() {
                 .putFloat(KEY_DRAW_THRESHOLD, drawThreshold)
                 .putFloat(KEY_ANALYSIS_THRESHOLD, analysisThreshold)
                 .putInt(KEY_ALERT_REPEAT_MODE, alertRepeatMode)
+                .putBoolean(KEY_GPU_ENABLED, gpuEnabled)
                 .apply()
         }
         
@@ -160,7 +163,8 @@ class DriverApplication : Application() {
                 isSlidingWindowMode = prefs.getBoolean(KEY_SLIDING_WINDOW_MODE, false),
                 drawThreshold = prefs.getFloat(KEY_DRAW_THRESHOLD, 0.5f),
                 analysisThreshold = prefs.getFloat(KEY_ANALYSIS_THRESHOLD, 0.5f),
-                alertRepeatMode = prefs.getInt(KEY_ALERT_REPEAT_MODE, ALERT_REPEAT_ONCE)
+                alertRepeatMode = prefs.getInt(KEY_ALERT_REPEAT_MODE, ALERT_REPEAT_ONCE),
+                gpuEnabled = prefs.getBoolean(KEY_GPU_ENABLED, true)
             )
         }
     }
@@ -179,7 +183,8 @@ class DriverApplication : Application() {
         val isSlidingWindowMode: Boolean = false,
         val drawThreshold: Float = 0.5f,
         val analysisThreshold: Float = 0.5f,
-        val alertRepeatMode: Int = ALERT_REPEAT_CONTINUOUS  // 0=只播放一次, 1=持续播放（默认）
+        val alertRepeatMode: Int = ALERT_REPEAT_CONTINUOUS,  // 0=只播放一次, 1=持续播放（默认）
+        val gpuEnabled: Boolean = true  // GPU 加速（默认启用）
     )
     
     /**

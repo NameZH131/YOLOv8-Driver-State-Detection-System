@@ -91,6 +91,9 @@ fun SettingsDialog(
     var alertRepeatMode by remember { mutableIntStateOf(currentSettings.alertRepeatMode) }
     var showOnceConfirmDialog by remember { mutableStateOf(false) }
     
+    // GPU 加速
+    var gpuEnabled: Boolean by remember { mutableStateOf(currentSettings.gpuEnabled) }
+    
     // 构建当前设置状态的辅助函数
     fun buildCurrentSettings() = MainViewModel.SettingsState(
         vibrationEnabled = vibrationEnabled,
@@ -106,7 +109,8 @@ fun SettingsDialog(
         slidingPoseMapping = slidingPoseMapping,
         drawThreshold = drawThreshold,
         analysisThreshold = analysisThreshold,
-        alertRepeatMode = alertRepeatMode
+        alertRepeatMode = alertRepeatMode,
+        gpuEnabled = gpuEnabled
     )
     
     // 音频选择器
@@ -582,6 +586,39 @@ fun SettingsDialog(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
+                }
+                
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                
+                // ========== 计算后端 ==========
+                SettingsSectionHeader(title = stringResource(R.string.compute_backend))
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.gpu_acceleration),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = stringResource(R.string.gpu_acceleration_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = gpuEnabled,
+                        onCheckedChange = { 
+                            gpuEnabled = it
+                            onAutoSave(buildCurrentSettings())
+                        },
+                        modifier = Modifier.height(24.dp)
+                    )
                 }
             }
         },

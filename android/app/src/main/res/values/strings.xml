@@ -148,5 +148,11 @@
     <string name="calibration_state_done">Calibration complete</string>
     <string name="calibration_success_message">Calibration successful!</string>
     <string name="rotation_auto">Auto</string>
+    
+    <!-- GPU Acceleration -->
+    <string name="compute_backend">Compute Backend</string>
+    <string name="gpu_acceleration">GPU Acceleration</string>
+    <string name="gpu_acceleration_desc">Use Vulkan GPU for faster inference</string>
+    <string name="gpu_fallback_to_cpu">GPU acceleration not available, switched to CPU mode</string>
 
 </resources>

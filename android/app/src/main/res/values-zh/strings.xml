@@ -149,5 +149,11 @@
     <string name="calibration_state_done">校准完成</string>
     <string name="calibration_success_message">校准成功!</string>
     <string name="rotation_auto">自动</string>
+    
+    <!-- GPU Acceleration -->
+    <string name="compute_backend">计算后端</string>
+    <string name="gpu_acceleration">GPU 加速</string>
+    <string name="gpu_acceleration_desc">使用 Vulkan GPU 加速推理</string>
+    <string name="gpu_fallback_to_cpu">GPU 加速不可用，已切换到 CPU 模式</string>
 
 </resources>

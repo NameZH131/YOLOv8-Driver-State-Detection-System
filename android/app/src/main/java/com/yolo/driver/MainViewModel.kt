@@ -67,7 +67,9 @@ class MainViewModel : ViewModel() {
         val drawThreshold: Float = 0.5f,            // 绘制阈值 (0.3-0.8)
         val analysisThreshold: Float = 0.5f,        // 分析阈值 (0.3-0.8)
         // 提醒重复模式: 0=只播放一次, 1=持续播放（默认）
-        val alertRepeatMode: Int = 1
+        val alertRepeatMode: Int = 1,
+        // GPU 加速: 默认启用
+        val gpuEnabled: Boolean = true
     )
     
     // UI 状态
@@ -81,11 +83,9 @@ class MainViewModel : ViewModel() {
         val detectionError: String? = null,
         val noPersonCount: Int = 0,
         val settingsState: SettingsState = SettingsState(),
-        val windowFrameCount: Int = 0,              // 滑动窗内帧数
-        // 关键点数据（用于 Compose 绘制）
-        val keypoints: List<KeypointDetector.KeyPoint> = emptyList(),
-        val frameWidth: Int = 640,
-        val frameHeight: Int = 480
+        val windowFrameCount: Int = 0              // 滑动窗内帧数
+        // 注意：keypoints, frameWidth, frameHeight, rotationDegrees 已移至单独的 StateFlow
+        // 以减少 KeypointOverlay 更新时的重组范围
     )
     
     private val _uiState = MutableStateFlow(UiState())
@@ -194,17 +194,24 @@ class MainViewModel : ViewModel() {
         }
     }
     
+    // rotationDegrees 单独存储（避免频繁更新 UiState）
+    private val _rotationDegrees = MutableStateFlow(0)
+    val rotationDegreesFlow: StateFlow<Int> = _rotationDegrees.asStateFlow()
+    
     /**
      * 更新关键点和帧尺寸（用于 Compose 绘制）
+     * 优化：只更新单独的 StateFlow，不更新 UiState，减少重组范围
+     * @param kps 关键点列表
+     * @param width 帧宽度
+     * @param height 帧高度
+     * @param rotationDegrees 相机传感器旋转角度
      */
-    fun updateKeypoints(kps: List<KeypointDetector.KeyPoint>, width: Int, height: Int) {
+    fun updateKeypoints(kps: List<KeypointDetector.KeyPoint>, width: Int, height: Int, rotationDegrees: Int = 0) {
         _keypoints.value = kps
         _frameSize.value = Pair(width, height)
-        _uiState.value = _uiState.value.copy(
-            keypoints = kps,
-            frameWidth = width,
-            frameHeight = height
-        )
+        _rotationDegrees.value = rotationDegrees
+        // 不再更新 _uiState，减少重组范围
+        // KeypointOverlay 直接订阅 keypoints 和 frameSize StateFlow
     }
     
     /**
@@ -212,7 +219,6 @@ class MainViewModel : ViewModel() {
      */
     fun clearKeypoints() {
         _keypoints.value = emptyList()
-        _uiState.value = _uiState.value.copy(keypoints = emptyList())
     }
     
     /**
@@ -409,7 +415,8 @@ class MainViewModel : ViewModel() {
                 isSlidingWindowMode = allSettings.isSlidingWindowMode,
                 drawThreshold = allSettings.drawThreshold,
                 analysisThreshold = allSettings.analysisThreshold,
-                alertRepeatMode = allSettings.alertRepeatMode
+                alertRepeatMode = allSettings.alertRepeatMode,
+                gpuEnabled = allSettings.gpuEnabled
             )
         )
         

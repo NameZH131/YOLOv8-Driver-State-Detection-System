@@ -31,11 +31,12 @@ bool YOLOv8Pose::init(const std::string& paramPath, const std::string& binPath, 
     
     auto* net = new ncnn::Net();
     net->opt.use_vulkan_compute = useGPU_;
-    net->opt.use_fp16_packed = true;
-    net->opt.use_fp16_storage = true;
+    // 禁用可能导致设备兼容性问题的优化选项
+    net->opt.use_fp16_packed = false;      // 禁用 FP16 打包，避免内存布局问题
+    net->opt.use_fp16_storage = false;     // 禁用 FP16 存储，确保跨设备一致性
     net->opt.use_fp16_arithmetic = false;
     net->opt.use_int8_storage = false;
-    net->opt.use_packing_layout = true;
+    net->opt.use_packing_layout = false;   // 禁用打包布局，避免 stride 问题
     
     // Load model
     if (net->load_param(paramPath.c_str()) != 0) {
