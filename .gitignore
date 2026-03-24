@@ -78,3 +78,8 @@ conversation-*.txt
 # 媒体资源（可选）
 asset/
 assets/
+
+# 内部文档（不公开）
+AGENTS.md
+document.drawio
+ENVIRONMENT.md

@@ -1,9 +1,11 @@
 # YOLOv8 Driver State Detection System
 
+**[English](./README-en.md)** | **[Android 项目](./android/README.md)**
+
 基于YOLOv8-Pose模型的实时驾驶员疲劳状态检测系统，通过分析人体姿态关键点来判断驾驶员的疲劳程度。
 if u think this is so good ,please start it.🤧🤧
 
-![alt text](asset/1.png)
+![alt text](assets/1.png)
 
 ![remotion](assets/remotion.gif)
 

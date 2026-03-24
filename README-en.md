@@ -1,9 +1,15 @@
 # YOLOv8 Driver State Detection System
 
+**[中文](./README.md)** | **[Android Project](./android/README-en.md)**
+
 A real-time driver fatigue detection system based on YOLOv8-Pose model, analyzing human pose keypoints to determine the driver's fatigue level.
 if u think this is so good ,please start it.🤧🤧
 
-![alt text](asset/1.png)
+![alt text](assets/1.png)
+
+![remotion](assets/remotion.gif)
+
+
 
 ## Features
 
