@@ -1,8 +1,23 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// 从 local.properties 读取签名密码
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+
+val releaseStorePassword: String = localProperties.getProperty("RELEASE_STORE_PASSWORD") 
+    ?: throw GradleException("RELEASE_STORE_PASSWORD not found in local.properties")
+val releaseKeyPassword: String = localProperties.getProperty("RELEASE_KEY_PASSWORD") 
+    ?: throw GradleException("RELEASE_KEY_PASSWORD not found in local.properties")
 
 android {
     namespace = "com.yolo.driver"
@@ -36,9 +51,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("../release-key.jks")
-            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String? ?: "yolo123456"
+            storePassword = releaseStorePassword
             keyAlias = "yolo-driver"
-            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String? ?: "yolo123456"
+            keyPassword = releaseKeyPassword
         }
     }
 
