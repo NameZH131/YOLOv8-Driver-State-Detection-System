@@ -41,6 +41,7 @@ torch_cache/
 
 # Logs
 *.log
+
 logs/
 
 # OS
@@ -53,3 +54,5 @@ temp/
 *.tmp
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+*.drawio
+nul

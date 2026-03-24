@@ -36,9 +36,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("../release-key.jks")
-            storePassword = "yolo123456"
+            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String? ?: "yolo123456"
             keyAlias = "yolo-driver"
-            keyPassword = "yolo123456"
+            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String? ?: "yolo123456"
         }
     }
 
